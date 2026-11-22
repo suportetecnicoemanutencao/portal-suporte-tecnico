@@ -216,6 +216,14 @@ create policy notif_upd on public.notificacoes for update to authenticated
 drop policy if exists infra_sel on public.infraspeak_eventos;
 create policy infra_sel on public.infraspeak_eventos for select to authenticated using (public.is_supervisor());
 
+-- ---------- PERMISSÕES DA API ----------
+-- (projetos novos do Supabase não liberam tabelas novas na API automaticamente)
+grant usage on schema public to anon, authenticated, service_role;
+grant select, insert, update, delete on all tables in schema public to authenticated;
+grant all on all tables in schema public to service_role;
+grant usage, select on all sequences in schema public to authenticated, service_role;
+grant execute on function public.is_supervisor(), public.is_equipe() to authenticated, service_role;
+
 -- ---------- REALTIME (sininho de notificações) ----------
 do $$ begin
   alter publication supabase_realtime add table public.notificacoes;

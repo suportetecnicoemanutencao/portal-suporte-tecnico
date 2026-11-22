@@ -55,7 +55,8 @@ export default async (req: Request) => {
       telefone = e.PHONE?.[0]?.VALUE || ""
       email = e.EMAIL?.[0]?.VALUE || ""
     }
-    if (!nome) nome = dialogo.name || ""
+    // sem lead/contato no CRM: usa o nome da conversa ("cliente - Linha do Canal Aberto")
+    if (!nome) nome = String(dialogo.name || "").split(" - ")[0].trim()
 
     const crmUrl = entidadeId && entidadeTipo
       ? `${portalBitrix()}/crm/${entidadeTipo.toLowerCase()}/details/${entidadeId}/`

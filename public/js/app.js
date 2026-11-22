@@ -66,14 +66,15 @@ async function iniciarSessao(session) {
   if (!session) { me = null; $("#login").classList.remove("off"); return; }
   const { data: perfil, error } = await sb.from("perfis").select("*").eq("id", session.user.id).single();
   if (error || !perfil || !perfil.ativo) {
-    $("#lgErr").textContent = "Usuário sem acesso ao portal. Fale com o Supervisor.";
+    $("#lgErr").textContent = error ? "Erro ao carregar o perfil: " + error.message : "Usuário sem acesso ao portal. Fale com o Supervisor.";
+    console.error("perfil", error, perfil);
     await sb.auth.signOut(); return;
   }
   me = perfil;
   const { data: ps } = await sb.from("perfis").select("id,nome,papel,ativo");
   perfis = Object.fromEntries((ps || []).map(p => [p.id, p]));
   $("#login").classList.add("off");
-  $("#uchip").innerHTML = `<b>${esc(me.nome)}</b><span class="pill">${me.papel === "supervisor" ? "Supervisor" : "Auxiliar"}</span><button class="btn sm" id="btnSenha" type="button">Senha</button>`;
+  $("#uchip").innerHTML = `<b>${esc(me.nome)}</b><span class="pill">${me.papel === "supervisor" ? "Administrador · Supervisor" : "Auxiliar"}</span><button class="btn sm" id="btnSenha" type="button">Senha</button>`;
   $("#btnSenha").onclick = () => { $("#sErr").textContent = ""; $("#mSenha").classList.add("on"); $("#s_nova").focus(); };
   $$(".sup-only").forEach(e => e.style.display = isSup() ? "" : "none");
   $("#fEscopo").value = isSup() ? "todos" : "meus";
@@ -218,7 +219,7 @@ async function flush() {
 window.addEventListener("beforeunload", () => { if (Object.keys(pendente).length) flush(); });
 
 const CAMPOS = [
-  ["cliente", "Cliente / loja"], ["contato", "Nº da conversa Bitrix ou telefone"],
+  ["cliente", "Cliente / loja"], ["contato", "Nº da conversa ou telefone"],
   ["canal", "Canal de entrada", ["Bitrix", "WhatsApp técnico", "Comercial", "Ligação direta"]],
   ["modelo", "Modelo", null], ["tipo", "Tipo", TIPOS],
   ["endereco", "Endereço onde a máquina está instalada", null, "full"], ["cnpj", "CNPJ para cobrança"], ["email_nf", "E-mail para envio das notas"],
@@ -320,7 +321,7 @@ async function vincularBitrix() {
     const { data: { session } } = await sb.auth.getSession();
     const r = await fetch("/api/bitrix/vincular", { method: "POST", headers: { "Content-Type": "application/json", Authorization: "Bearer " + session.access_token }, body: JSON.stringify({ atendimento_id: A.id, numero }) });
     const j = await r.json().catch(() => ({ erro: "Resposta inválida do servidor" }));
-    if (!r.ok) throw new Error(j.erro || "Falha ao vincular");
+    if (!r.ok) throw new Error(j.erro || j.errorMessage || `Falha ao vincular (erro ${r.status})`);
     A = { ...j.atendimento }; const i = lista.findIndex(x => x.id === A.id); if (i >= 0) lista[i] = j.atendimento;
     toast("Conversa vinculada"); renderAll(true); carregarEventos();
   } catch (e) { $("#bxErr").textContent = e.message; }
@@ -477,7 +478,7 @@ $("#symSearch").oninput = renderTests;
 /* chamado */
 function renderChamado() {
   const req = [
-    ["Nome do cliente / loja", !!F("cliente")], ["Nº da conversa do Bitrix ou telefone", !!(F("contato") || A?.bitrix_sessao)],
+    ["Nome do cliente / loja", !!F("cliente")], ["Nº da conversa ou telefone", !!(F("contato") || A?.bitrix_sessao)],
     ["Motivo da abertura em texto", !!F("motivo")], ["Vídeo da primeira análise", !!A?.video_recebido],
     ["Modelo e tipo (aluguel / venda em garantia)", !!F("modelo") && !!F("tipo")], ["Endereço confirmado", !!F("endereco")],
   ];

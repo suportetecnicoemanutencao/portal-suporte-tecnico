@@ -17,7 +17,7 @@ scripts/                gerar-config (build) · criar-usuarios
 | Perfil | Pode |
 |---|---|
 | Auxiliar (Katielen, Mayara) | registrar atendimentos, editar os próprios, ver os da equipe, receber lembretes |
-| Supervisor (Thalison) | tudo acima + editar qualquer atendimento, dashboard, relatório mensal, avisos de atendimentos parados |
+| Administrador · Supervisor (Thalison) | tudo acima + editar qualquer atendimento, dashboard, relatório mensal, avisos de atendimentos parados |
 
 ## Passo a passo para colocar no ar
 
@@ -36,6 +36,11 @@ SUPABASE_URL="https://xxxx.supabase.co" SUPABASE_SERVICE_ROLE_KEY="..." SENHA_IN
 ```
 Cria Thalison (supervisor), Katielen e Mayara (auxiliares). Cada uma pode trocar a senha no botão **Senha** do portal.
 Alternativa sem terminal: Supabase → Authentication → Users → *Add user* (marque *Auto confirm*); depois, na tabela `perfis`, ajuste `nome` e `papel`.
+
+Usuário criado pelo painel entra como **auxiliar**. Para tornar o Thalison administrador do portal e supervisor da equipe, rode no SQL Editor:
+```sql
+update public.perfis set papel = 'supervisor', nome = 'Thalison' where email = 'manutencao@nebulize.com.br';
+```
 
 ### 3. GitHub
 Crie um repositório **privado** (ex.: `portal-suporte-tecnico`) e envie esta pasta:
