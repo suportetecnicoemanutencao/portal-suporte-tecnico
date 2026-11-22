@@ -3,6 +3,12 @@
   publish = "public"
   functions = "netlify/functions"
 
+# SUPABASE_URL e SUPABASE_ANON_KEY são públicas por natureza (vão para o navegador
+# em public/js/config.js; o acesso é protegido pelas regras RLS do banco).
+# A chave service_role continua secreta e nunca é escrita em arquivo.
+[build.environment]
+  SECRETS_SCAN_OMIT_KEYS = "SUPABASE_URL,SUPABASE_ANON_KEY"
+
 [functions]
   node_bundler = "esbuild"
 
