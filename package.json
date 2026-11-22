@@ -1,0 +1,15 @@
+{
+  "name": "portal-suporte-tecnico",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/gerar-config.mjs",
+    "usuarios": "node scripts/criar-usuarios.mjs"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "2.45.4"
+  },
+  "devDependencies": {
+    "@netlify/functions": "^2.8.2"
+  }
+}
