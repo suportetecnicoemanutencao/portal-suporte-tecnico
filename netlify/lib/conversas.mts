@@ -15,6 +15,8 @@ import { mensagensDoHistorico, type Msg } from "./bitrix-conversa.mts"
 const H = 3600e3
 export const PROMESSA = /(s[óo]\s+um\s+(momento|minuto|minutinho|instante)|um\s+momento|um\s+minutinho|aguarde|vou\s+(verificar|ver|checar|confirmar|consultar|conferir|olhar|analisar)|j[áa]\s+(verifico|vejo|confiro|te\s+(retorno|respondo|falo|passo))|te\s+retorno|retorno\s+(em|j[áa]|logo)|deixa\s+eu\s+(ver|verificar)|estou\s+verificando|vou\s+te\s+retornar)/i
 const CORTESIA = /^\s*(ok+|okay|okk|obrigad[oa]s?|muito obrigad[oa]|grat[oa]|valeu|vlw|at[ée]\s*(breve|mais|logo)|blz|beleza|certo|perfeito|show|t[áa]\s*bom|combinado|de nada|disponha|bom dia|boa tarde|boa noite|tudo bem|👍+|🙏+|ótimo|otimo)[\s!.,]*$/i
+/** Pedido de cobrança citado no chat: "precisa ser cobrado", "cobrar o cliente", "gerar boleto", "faturar"… */
+export const COBRANCA = /(precis[ae]\s+(ser\s+)?cobra|ser\s+cobrad|cobrar\s+(?!o\s+t[ée]cnico|a\s+t[ée]cnica|t[ée]cnico)(o|a|do|da|esse|essa|este|esta|cliente|loja|visita|pe[çc]a|servi[çc]o|valor)|cobran[çc]a|gerar\s+(o\s+)?boleto|emitir\s+(o\s+)?boleto|enviar\s+(o\s+)?boleto|faturar|faturamento|pagamento\s+pendente|em\s+aberto\s+para\s+pagamento|n[ãa]o\s+foi\s+pago|deve\s+ser\s+cobrad)/i
 const FECHOU = /(encerrou|finalizou|fechou)\s+a\s+(sess[ãa]o|conversa)|(sess[ãa]o|conversa)\s+(foi\s+)?(encerrada|finalizada|fechada)/i
 const FINAIS = ["finalizado", "resolvido_chat", "cancelado"]
 
@@ -43,10 +45,15 @@ export function analisar(msgs: Msg[], agora = Date.now()) {
     clienteDesde = conversa.slice(idx).find(m => m.tipo === "cliente")?.data || ult.data
   }
   const promessa = ult?.tipo === "operador" && PROMESSA.test(ult.texto) && ult.texto.length < 220
+  // última mensagem (não-bot) que fala em cobrança
+  const cob = [...msgs].reverse().find(m => m.tipo !== "bot" && m.texto && COBRANCA.test(m.texto) && !/PowerZap/i.test(m.texto))
   // cliente só agradeceu / despediu-se depois da resposta da auxiliar: não precisa de retorno
   const cortesia = ult?.tipo === "cliente" && !!ultOp && conversa.slice(conversa.indexOf(ultOp) + 1).every(m => CORTESIA.test(m.texto))
   return {
     cortesia,
+    cobranca_msg_id: cob?.id ?? null,
+    cobranca_texto: cob ? `${cob.tipo === "cliente" ? "Cliente" : cob.nome.split(" ")[0]}: ${cob.texto}`.slice(0, 280) : null,
+    cobranca_em: cob?.data ?? null,
     encerrada,
     ultimo_msg_id: ult?.id ?? null,
     ultima_msg_em: ult?.data ?? null,
@@ -138,8 +145,15 @@ export async function acompanharConversas(db: SupabaseClient, tempoOk: () => boo
       let sit = situacao(a, !!at?.os_numero)
       if (sit && s.resolvido_msg_id && a.ultimo_msg_id && s.resolvido_msg_id >= a.ultimo_msg_id) sit = "em_dia"
       const perfil = porBitrix.get(donos[s.sessao])!
+      // cobrança pendente: há pedido de cobrança e ele é mais novo que o último "Cobrança feita"
+      const cobranca = !!a.cobranca_msg_id && !(s.cobranca_feita_msg_id && s.cobranca_feita_msg_id >= a.cobranca_msg_id)
       const alertas = { ...(s.alertas || {}) }
       // aviso (repete a cada 3 h; "nova" só uma vez)
+      if (podeAvisar && cobranca && alertas.cobranca_msg !== a.cobranca_msg_id) {
+        const nome = cliente?.name || s.cliente || s.nome || "Cliente"
+        await avisar(db, perfil, `Cobrança a fazer · conversa nº ${s.sessao}`, `${nome}: ${(a.cobranca_texto || "").slice(0, 120)}`, `${portalBitrix()}/online/?IM_DIALOG=chat${s.chat_id}`, at?.id ?? null, "conversa_cobranca")
+        alertas.cobranca_msg = a.cobranca_msg_id; avisos++
+      }
       if (podeAvisar && sit && ["sem_resposta", "promessa", "chamado", "nova"].includes(sit)) {
         const ultimo = alertas[sit] ? Date.parse(alertas[sit]) : 0
         const intervalo = sit === "nova" ? Infinity : 3 * H
@@ -159,6 +173,7 @@ export async function acompanharConversas(db: SupabaseClient, tempoOk: () => boo
         encerrada: a.encerrada, ultimo_msg_id: a.ultimo_msg_id, ultima_msg_em: a.ultima_msg_em, ultima_msg_de: a.ultima_msg_de,
         ultimo_texto: a.ultimo_texto, cliente_desde: a.cliente_desde, operador_respondeu: a.operador_respondeu,
         ultima_resposta_em: a.ultima_resposta_em, promessa: a.promessa, situacao: sit, alertas, atualizada_em: agoraIso,
+        cobranca, cobranca_msg_id: a.cobranca_msg_id, cobranca_texto: a.cobranca_texto, cobranca_em: a.cobranca_em,
         ...(at ? { atendimento_id: at.id } : {}),
       }).eq("sessao", s.sessao)
     }
@@ -171,13 +186,13 @@ export async function acompanharConversas(db: SupabaseClient, tempoOk: () => boo
     const { data: feito } = await db.from("config_portal").select("chave").eq("chave", chave).maybeSingle()
     if (!feito) {
       await db.from("config_portal").insert({ chave, valor: true })
-      const { data: todas } = await db.from("bitrix_sessoes").select("operador,situacao").eq("encerrada", false).not("operador", "is", null)
+      const { data: todas } = await db.from("bitrix_sessoes").select("operador,situacao,cobranca").eq("encerrada", false).not("operador", "is", null)
       for (const p of porBitrix.values()) {
         const minhas = (todas || []).filter(x => x.operador === p.id)
         const c = (k: string) => minhas.filter(x => x.situacao === k).length
         if (!minhas.length) continue
         await avisar(db, p, `Bom dia, ${p.nome.split(" ")[0]}! Resumo das conversas`,
-          `Sem resposta: ${c("sem_resposta")} · Promessas pendentes: ${c("promessa")} · Novas: ${c("nova")} · Chamados a atualizar: ${c("chamado")} · Cliente aguardando: ${c("responder")}`,
+          `Sem resposta: ${c("sem_resposta")} · Promessas pendentes: ${c("promessa")} · Cobranças: ${minhas.filter(x => x.cobranca).length} · Novas: ${c("nova")} · Chamados a atualizar: ${c("chamado")} · Cliente aguardando: ${c("responder")}`,
           null, null, "resumo_diario")
         avisos++
       }

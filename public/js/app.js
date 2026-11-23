@@ -68,7 +68,7 @@ async function iniciarSessao(session) {
   if (error || !perfil || !perfil.ativo) {
     $("#lgErr").textContent = error ? "Erro ao carregar o perfil: " + error.message : "Usuário sem acesso ao portal. Fale com o Supervisor.";
     console.error("perfil", error, perfil);
-    await sb.auth.signOut(); return;
+    await sb.auth.signOut({ scope: "local" }); return;
   }
   me = perfil;
   const { data: ps } = await sb.from("perfis").select("id,nome,papel,ativo");
@@ -101,7 +101,33 @@ $("#lgReset").onclick = async () => {
   const { error } = await sb.auth.resetPasswordForEmail(email, { redirectTo: location.origin });
   $("#lgErr").textContent = error ? error.message : "Enviamos um link de redefinição para o seu e-mail.";
 };
-$("#btnSair").onclick = async () => { await sb.auth.signOut(); location.hash = ""; location.reload(); };
+// "local": sair deste navegador sem derrubar a sessão nos outros computadores/celular
+$("#btnSair").onclick = async () => { await sb.auth.signOut({ scope: "local" }); location.hash = ""; location.reload(); };
+
+/** Chama uma função do servidor com o token atual; se ele tiver expirado, renova e tenta de novo. */
+async function chamarApi(caminho, corpo) {
+  const envia = async () => {
+    const { data: { session } } = await sb.auth.getSession();
+    if (!session) return { status: 401, json: { erro: "Sessão encerrada" } };
+    const r = await fetch(caminho, { method: "POST", headers: { "Content-Type": "application/json", Authorization: "Bearer " + session.access_token }, body: JSON.stringify(corpo) });
+    return { status: r.status, ok: r.ok, json: await r.json().catch(() => ({ erro: "Resposta inválida do servidor" })) };
+  };
+  let r = await envia();
+  if (r.status === 401) {
+    const { error } = await sb.auth.refreshSession();
+    if (!error) r = await envia();
+    if (r.status === 401) { sessaoExpirada(); throw new Error("Sua sessão expirou. Entre novamente para continuar."); }
+  }
+  if (!r.ok) throw new Error(r.json.erro || r.json.errorMessage || `Erro ${r.status}`);
+  return r.json;
+}
+function sessaoExpirada() {
+  $("#lgErr").textContent = "Sua sessão expirou (por exemplo, saiu do portal em outro aparelho). Entre novamente.";
+  if (me?.email) $("#lgEmail").value = me.email;
+  me = null; window._recarregar = true; $("#login").classList.remove("off");
+}
+// ao voltar para a aba depois de muito tempo, renova o token antes de qualquer ação
+document.addEventListener("visibilitychange", () => { if (!document.hidden) sb.auth.getSession().then(({ data }) => { if (!data.session && me) sessaoExpirada(); }); });
 $("#sCancel").onclick = () => $("#mSenha").classList.remove("on");
 $("#fSenha").addEventListener("submit", async e => {
   e.preventDefault();
@@ -110,7 +136,9 @@ $("#fSenha").addEventListener("submit", async e => {
 });
 sb.auth.onAuthStateChange((ev, session) => {
   if (ev === "PASSWORD_RECOVERY") { setTimeout(() => $("#mSenha").classList.add("on"), 500); }
+  if (ev === "SIGNED_IN" && window._recarregar) { location.reload(); return; }
   if (ev === "SIGNED_IN" && !me) iniciarSessao(session);
+  if (ev === "TOKEN_REFRESHED" && !session && me) sessaoExpirada();
   if (ev === "SIGNED_OUT") { me = null; $("#login").classList.remove("off"); }
 });
 
@@ -330,10 +358,7 @@ async function vincularBitrix() {
   await flush();
   $("#bxVincular").disabled = true; $("#bxVincular").textContent = "Buscando…";
   try {
-    const { data: { session } } = await sb.auth.getSession();
-    const r = await fetch("/api/bitrix/vincular", { method: "POST", headers: { "Content-Type": "application/json", Authorization: "Bearer " + session.access_token }, body: JSON.stringify({ atendimento_id: A.id, numero }) });
-    const j = await r.json().catch(() => ({ erro: "Resposta inválida do servidor" }));
-    if (!r.ok) throw new Error(j.erro || j.errorMessage || `Falha ao vincular (erro ${r.status})`);
+    const j = await chamarApi("/api/bitrix/vincular", { atendimento_id: A.id, numero });
     A = { ...j.atendimento }; const i = lista.findIndex(x => x.id === A.id); if (i >= 0) lista[i] = j.atendimento;
     toast(j.capturados?.length ? "Capturado: " + j.capturados.join(", ") : "Conversa lida · nenhum dado novo"); renderAll(true); carregarEventos();
   } catch (e) { $("#bxErr").textContent = e.message; }
@@ -378,30 +403,37 @@ function renderConversas() {
     cvPessoa = sel.value || null;
   } else cvPessoa = me.id;
   const minhas = conversas.filter(c => !cvPessoa || c.operador === cvPessoa);
-  const urg = conversas.filter(c => c.operador === me.id && ["sem_resposta", "promessa", "nova", "chamado"].includes(c.situacao)).length;
+  const urg = conversas.filter(c => c.operador === me.id && (["sem_resposta", "promessa", "nova", "chamado"].includes(c.situacao) || c.cobranca)).length;
   $("#navConv").hidden = !urg; $("#navConv").textContent = urg;
   const cnt = k => minhas.filter(c => c.situacao === k).length;
-  $("#cvKpis").innerHTML = ORDEM_CV.map(k => `<div class="kpi clicavel ${CV[k][2] === "crit" && cnt(k) ? "alerta" : CV[k][2] === "warn" && cnt(k) ? "warn" : k === "em_dia" ? "ok" : "info"}${cvFiltro === k ? " sel" : ""}" data-cv="${k}" role="button" tabindex="0"><span>${CV[k][0]}</span><b class="v">${cnt(k)}</b></div>`).join("");
+  const nCob = minhas.filter(c => c.cobranca).length;
+  $("#cvKpis").innerHTML = `<div class="kpi clicavel ${nCob ? "alerta" : "ok"}${cvFiltro === "cobranca" ? " sel" : ""}" data-cv="cobranca" role="button" tabindex="0"><span>Cobranças a fazer</span><b class="v">${nCob}</b></div>` + ORDEM_CV.map(k => `<div class="kpi clicavel ${CV[k][2] === "crit" && cnt(k) ? "alerta" : CV[k][2] === "warn" && cnt(k) ? "warn" : k === "em_dia" ? "ok" : "info"}${cvFiltro === k ? " sel" : ""}" data-cv="${k}" role="button" tabindex="0"><span>${CV[k][0]}</span><b class="v">${cnt(k)}</b></div>`).join("");
   $$("#cvKpis [data-cv]").forEach(e => e.onclick = () => { cvFiltro = cvFiltro === e.dataset.cv ? "" : e.dataset.cv; renderConversas(); });
-  const grupos = ORDEM_CV.filter(k => !cvFiltro || k === cvFiltro).map(k => {
+  const blocoCob = cvFiltro === "cobranca" || (!cvFiltro && nCob) ? (() => {
+    const itens = minhas.filter(c => c.cobranca).sort((a, b) => Date.parse(a.cobranca_em || 0) - Date.parse(b.cobranca_em || 0));
+    return itens.length ? `<details class="card" open style="border-left:5px solid var(--crit)"><summary style="cursor:pointer;font-family:var(--display);font-weight:700;font-size:18px">Cobranças a fazer · ${itens.length}</summary><div>${itens.map(c => linhaConversa(c, c.situacao || "em_dia", true)).join("")}</div></details>` : '<div class="card"><p class="lead" style="margin:0">Nenhuma cobrança pendente.</p></div>';
+  })() : "";
+  const grupos = blocoCob + ORDEM_CV.filter(k => !cvFiltro || k === cvFiltro).map(k => {
     const itens = minhas.filter(c => c.situacao === k).sort((a, b) => Date.parse(a.cliente_desde || a.ultima_msg_em || 0) - Date.parse(b.cliente_desde || b.ultima_msg_em || 0));
     if (!itens.length) return "";
     const aberto = k !== "em_dia" || cvFiltro === "em_dia";
     return `<details class="card" ${aberto ? "open" : ""}><summary style="cursor:pointer;font-family:var(--display);font-weight:700;font-size:18px">${CV[k][0]} · ${itens.length}</summary><div>${itens.map(c => linhaConversa(c, k)).join("")}</div></details>`;
   }).join("");
-  $("#cvGrupos").innerHTML = grupos || '<div class="card"><p class="lead" style="margin:0">Nenhuma conversa aberta no momento.</p></div>';
+  $("#cvGrupos").innerHTML = (cvFiltro === "cobranca" ? blocoCob : grupos) || '<div class="card"><p class="lead" style="margin:0">Nenhuma conversa aberta no momento.</p></div>';
   const ult = conversas.map(c => c.atualizada_em).filter(Boolean).sort().at(-1);
   $("#cvAtual").textContent = ult ? `Atualizado há ${haQuanto(ult)}.` : "";
 }
-function linhaConversa(c, k) {
+function linhaConversa(c, k, modoCob) {
   const at = c.atendimento_id ? lista.find(a => a.id === c.atendimento_id) : lista.find(a => a.bitrix_sessao === c.sessao && !FINAIS.includes(a.status));
   const espera = k === "sem_resposta" || k === "responder" || k === "nova" ? `cliente esperando há ${haQuanto(c.cliente_desde || c.ultima_msg_em)}` : k === "promessa" ? `prometido há ${haQuanto(c.ultima_msg_em)}` : k === "chamado" ? `última atualização há ${haQuanto(c.ultima_resposta_em)}` : `última mensagem há ${haQuanto(c.ultima_msg_em)}`;
   return `<div class="cv"><span class="bar" style="background:${CV[k][1]}"></span>
     <div><div class="tt"><b>${esc(c.cliente || c.nome || "Cliente")}</b><span class="pill">nº ${c.sessao}</span>${at ? `<span class="pill ok">#${at.id}${at.os_numero ? " · O.S. " + esc(at.os_numero) : ""}</span>` : ""}${isSup() && !cvPessoa ? `<span class="pill">${esc(perfis[c.operador]?.nome || "")}</span>` : ""}<span class="salvo">${espera}</span></div>
-    <div class="txt">${esc(c.ultimo_texto || "(arquivo, áudio ou imagem)")}</div></div>
+    <div class="txt">${esc(c.ultimo_texto || "(arquivo, áudio ou imagem)")}</div>
+    ${c.cobranca ? `<div class="note crit" style="margin-top:6px;padding:6px 10px;font-size:14px"><b style="display:inline">Cobrança a fazer</b> · ${fmtDH(c.cobranca_em)} — ${esc(c.cobranca_texto || "")}</div>` : ""}</div>
     <div class="acoes"><a class="btn sm" href="https://nebulize.bitrix24.com.br/online/?IM_DIALOG=chat${c.chat_id}" target="_blank" rel="noopener">Abrir no Bitrix</a>
-    ${at ? `<button class="btn sm" type="button" data-cvat="${at.id}">Atendimento</button>` : `<button class="btn sm" type="button" data-cvreg="${c.sessao}">Registrar</button>`}
-    ${k !== "em_dia" ? `<button class="btn sm pri" type="button" data-cvok="${c.sessao}">✓ Resolvido</button>` : ""}</div></div>`;
+    ${at ? `<button class="btn sm" type="button" data-cvat="${at.id}">Atendimento</button><select class="btn sm" data-cvst="${at.id}" aria-label="Status do atendimento #${at.id}"${podeEditar(at) ? "" : " disabled"}>${Object.entries(STATUS).map(([v, l]) => `<option value="${v}"${at.status === v ? " selected" : ""}>${l}</option>`).join("")}</select>` : `<button class="btn sm" type="button" data-cvreg="${c.sessao}">Registrar</button>`}
+    ${c.cobranca ? `<button class="btn sm" type="button" data-cvcob="${c.sessao}">Cobrança feita</button>` : ""}
+    ${k !== "em_dia" && !modoCob ? `<button class="btn sm pri" type="button" data-cvok="${c.sessao}">✓ Respondido</button>` : ""}</div></div>`;
 }
 $("#cvGrupos").addEventListener("click", async e => {
   const a = e.target.closest("[data-cvat]"); if (a) return abrirAtendimento(Number(a.dataset.cvat), true);
@@ -412,8 +444,25 @@ $("#cvGrupos").addEventListener("click", async e => {
     const c = conversas.find(x => x.sessao === Number(ok.dataset.cvok)); if (!c) return;
     const { error } = await sb.from("bitrix_sessoes").update({ resolvido_msg_id: c.ultimo_msg_id, situacao: "em_dia" }).eq("sessao", c.sessao);
     if (error) { toast(error.message); return; }
-    c.resolvido_msg_id = c.ultimo_msg_id; c.situacao = "em_dia"; renderConversas(); toast("Marcada como resolvida até chegar mensagem nova");
+    c.resolvido_msg_id = c.ultimo_msg_id; c.situacao = "em_dia"; renderConversas(); toast("Marcada como respondida até chegar mensagem nova");
   }
+  const cb = e.target.closest("[data-cvcob]");
+  if (cb) {
+    const c = conversas.find(x => x.sessao === Number(cb.dataset.cvcob)); if (!c) return;
+    const { error } = await sb.from("bitrix_sessoes").update({ cobranca: false, cobranca_feita_msg_id: c.cobranca_msg_id, cobranca_feita_em: new Date().toISOString() }).eq("sessao", c.sessao);
+    if (error) { toast(error.message); return; }
+    c.cobranca = false; c.cobranca_feita_msg_id = c.cobranca_msg_id; renderConversas(); toast("Cobrança marcada como feita");
+    const at = lista.find(a => a.bitrix_sessao === c.sessao && !FINAIS.includes(a.status));
+    if (at) sb.from("atendimento_eventos").insert({ atendimento_id: at.id, autor: me.id, tipo: "cobranca", descricao: "Cobrança feita: " + (c.cobranca_texto || "").slice(0, 150) }).then(() => {});
+  }
+});
+$("#cvGrupos").addEventListener("change", async e => {
+  const sel = e.target.closest("[data-cvst]"); if (!sel) return;
+  const id = Number(sel.dataset.cvst), st = sel.value;
+  const { data, error } = await sb.from("atendimentos").update({ status: st }).eq("id", id).select().single();
+  if (error) { toast(error.message); return; }
+  const i = lista.findIndex(x => x.id === id); if (i >= 0) lista[i] = data; if (A?.id === id) A = { ...data };
+  toast(`#${id}: ${STATUS[st]}`); renderLista();
 });
 const auxiliaresEquipe = () => Object.values(perfis).filter(p => p.ativo);
 setInterval(() => { if (me && location.hash === "#conversas") carregarConversas(); }, 60000);

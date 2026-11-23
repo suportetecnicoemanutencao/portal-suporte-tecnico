@@ -11,6 +11,7 @@ netlify/lib/            código comum das funções
 supabase/schema.sql     tabelas, regras de acesso (RLS) e gatilhos
 supabase/002_bitrix_automatico.sql   atualização: abertura automática e captura de dados do Bitrix
 supabase/003_conversas.sql           atualização: aba Minhas conversas + avisos no Bitrix
+supabase/004_cobrancas.sql           atualização: cobranças citadas no chat
 scripts/                gerar-config (build) · criar-usuarios
 ```
 
@@ -98,7 +99,9 @@ A cada 5 min o `bitrix-monitor` lê as conversas abertas em que cada uma é a re
 | Em dia | o resto (inclui "ok", "obrigado" do cliente depois da sua resposta) |
 
 **Avisos:** de segunda a sexta, 07:00–17:45, no sininho do portal e no sino do Bitrix (enviados pelo webhook, por isso chegam com alerta). O mesmo aviso repete a cada 3 h; "Nova" avisa uma vez. Resumo às 8h.
-**✓ Resolvido** tira a conversa dos alertas até chegar mensagem nova. Substitui o "Monitor Bitrix" em Apps Script da Katielen (desative os acionadores dele para não receber aviso em dobro).
+**✓ Respondido** tira a conversa dos alertas até chegar mensagem nova. Conversas com atendimento vinculado mostram o status do atendimento (Aguardando técnico, peça, cliente…) para trocar ali mesmo.
+
+**Cobranças a fazer (004):** quando alguém escreve no chat "precisa ser cobrado", "cobrar o cliente/a visita/a peça", "gerar/enviar boleto", "faturar", "pagamento pendente"… a conversa entra em *Cobranças a fazer* com o trecho da mensagem e gera um aviso. "Cobrar o técnico" não conta. O botão **Cobrança feita** baixa a pendência até aparecer um novo pedido de cobrança. Substitui o "Monitor Bitrix" em Apps Script da Katielen (desative os acionadores dele para não receber aviso em dobro).
 
 ## Como funciona no dia a dia
 1. **Registrar atendimento** antes de iniciar a conversa (canal, tipo, modelo; o nº do Bitrix pode vir depois).
