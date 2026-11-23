@@ -124,25 +124,30 @@ export async function lerConversa(numero: string): Promise<Conversa> {
   if (chatId && sessao) {
     const h = (await bitrix("imopenlines.session.history.get", { CHAT_ID: chatId, SESSION_ID: sessao })).result
     mensagens = mensagensDoHistorico(h)
-    // sessões longas: completa com as mensagens mais recentes do chat
-    if (h?.hasNextPage) {
-      const inicio = mensagens[0]?.id || 0
+    // sessões longas: o histórico traz as 50 mais recentes; busca as anteriores até o início da conversa
+    if (h?.hasNextPage && mensagens.length) {
       const vistos = new Set(mensagens.map(m => m.id))
-      let lastId: number | undefined
-      for (let i = 0; i < 4; i++) {
-        const r = (await bitrix("im.dialog.messages.get", { DIALOG_ID: `chat${chatId}`, LIMIT: 50, ...(lastId ? { LAST_ID: lastId } : {}) })).result
+      const inicioRe = new RegExp(`Conversa\\s*#?\\s*(?:\\[URL[^\\]]*\\])?${sessao}\\b`, "i")
+      let lastId = mensagens[0].id
+      for (let i = 0; i < 6; i++) {
+        const r = (await bitrix("im.dialog.messages.get", { DIALOG_ID: `chat${chatId}`, LIMIT: 50, LAST_ID: lastId })).result
         const us = Object.fromEntries((r?.users || []).map((u: any) => [String(u.id), u]))
         const lote = (r?.messages || []) as any[]
         if (!lote.length) break
+        let chegou = false
         for (const x of lote) {
-          if (x.id < inicio || vistos.has(x.id)) continue
+          if (vistos.has(x.id)) continue
           vistos.add(x.id)
           mensagens.push({ id: x.id, autor: String(x.author_id), nome: us[x.author_id]?.name || "Sistema", tipo: tipoAutor(String(x.author_id), us), data: x.date, texto: limpar(x.text) })
+          if (inicioRe.test(x.text || "")) chegou = true
         }
         lastId = Math.min(...lote.map((x: any) => x.id))
-        if (lastId <= inicio) break
+        if (chegou) break
       }
       mensagens.sort((a, b) => a.id - b.id)
+      // descarta o que for de sessões anteriores do mesmo chat
+      const ini = mensagens.findIndex(m => m.tipo === "sistema" && new RegExp(`Conversa\\s*#?\\s*${sessao}\\b`).test(m.texto))
+      if (ini > 0) mensagens = mensagens.slice(ini)
     }
   }
 

@@ -10,6 +10,7 @@ netlify/functions/      bitrix-vincular · bitrix-monitor (a cada 5 min) · infr
 netlify/lib/            código comum das funções
 supabase/schema.sql     tabelas, regras de acesso (RLS) e gatilhos
 supabase/002_bitrix_automatico.sql   atualização: abertura automática e captura de dados do Bitrix
+supabase/003_conversas.sql           atualização: aba Minhas conversas + avisos no Bitrix
 scripts/                gerar-config (build) · criar-usuarios
 ```
 
@@ -81,6 +82,23 @@ Rode `supabase/002_bitrix_automatico.sql` no SQL Editor (uma vez).
 - **Abertura automática:** a função `bitrix-monitor` (a cada 5 min) acompanha as conversas novas do Canal Aberto. Quando a auxiliar se apresenta com *"Olá, tudo bem? Você está falando com o Suporte Técnico Nebulize, me chamo Katielen."* (também reconhece "meu nome é Katielen" ou "sou a Katielen, do Suporte Técnico"), o atendimento é aberto no portal para ela, já vinculado à conversa, e ela recebe uma notificação.
   O nome da saudação é comparado com `perfis.nome_bitrix` (por padrão, o primeiro nome do perfil).
 - **Captura de dados:** ao vincular (ou clicar em *Atualizar do Bitrix*) e a cada 5 min nos atendimentos em aberto, o portal lê as mensagens da conversa e preenche os campos vazios: cliente, telefone, **CNPJ** (com dígito verificador), **nº de série** (padrão NBV… ou resposta ao pedido do nº de série), **nº da O.S.** ("ordem de serviço nº …"), e-mail, endereço e modelo. O que a auxiliar digitou nunca é sobrescrito; os campos capturados aparecem com a etiqueta *do Bitrix*.
+
+## Minhas conversas (atualização 003)
+Rode `supabase/003_conversas.sql` (já traz os IDs do Bitrix: Thalison 51, Katielen 8937, Mayara 14305).
+
+A cada 5 min o `bitrix-monitor` lê as conversas abertas em que cada uma é a responsável no Bitrix e classifica:
+
+| Grupo | Regra |
+|---|---|
+| Sem resposta há +4 h | última mensagem é do cliente e ele espera há mais de 4 h |
+| Promessa pendente | sua última mensagem foi "só um momento", "vou verificar", "te retorno"… há mais de 1 h |
+| Novas | conversa atribuída a você sem nenhuma resposta ainda |
+| Chamado a atualizar | atendimento com O.S. em aberto e mais de 24 h sem falar com o cliente |
+| Cliente aguardando | cliente escreveu há menos de 4 h |
+| Em dia | o resto (inclui "ok", "obrigado" do cliente depois da sua resposta) |
+
+**Avisos:** de segunda a sexta, 07:00–17:45, no sininho do portal e no sino do Bitrix (enviados pelo webhook, por isso chegam com alerta). O mesmo aviso repete a cada 3 h; "Nova" avisa uma vez. Resumo às 8h.
+**✓ Resolvido** tira a conversa dos alertas até chegar mensagem nova. Substitui o "Monitor Bitrix" em Apps Script da Katielen (desative os acionadores dele para não receber aviso em dobro).
 
 ## Como funciona no dia a dia
 1. **Registrar atendimento** antes de iniciar a conversa (canal, tipo, modelo; o nº do Bitrix pode vir depois).

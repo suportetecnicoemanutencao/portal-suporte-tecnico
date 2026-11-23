@@ -82,6 +82,7 @@ async function iniciarSessao(session) {
   await carregarLista();
   if (ultimo) await abrirAtendimento(ultimo, false);
   await carregarNotifs();
+  carregarConversas();
   assinarRealtime();
   renderAll();
   route();
@@ -354,6 +355,69 @@ $("#btnNota").onclick = async () => {
   $("#nota").value = ""; if (podeEditar(A)) patch({ observacoes: A.observacoes }, true); carregarEventos();
 };
 
+/* ================= MINHAS CONVERSAS ================= */
+let conversas = [], cvFiltro = "", cvPessoa = null;
+const CV = {
+  sem_resposta: ["Sem resposta há +4 h", "var(--crit)", "crit"], promessa: ["Promessa pendente", "var(--warn)", "warn"],
+  nova: ["Novas", "var(--info)", "info"], chamado: ["Chamado a atualizar", "#7a4fd0", "warn"],
+  responder: ["Cliente aguardando", "var(--leaf)", ""], em_dia: ["Em dia", "var(--line)", "ok"],
+};
+const ORDEM_CV = ["sem_resposta", "promessa", "nova", "chamado", "responder", "em_dia"];
+function haQuanto(d) { if (!d) return ""; const m = Math.max(0, Math.round((Date.now() - Date.parse(d)) / 60000)); return m < 60 ? `${m} min` : m < 1440 ? `${Math.floor(m / 60)} h ${m % 60 ? (m % 60) + " min" : ""}`.trim() : `${Math.floor(m / 1440)} d ${Math.floor((m % 1440) / 60)} h`; }
+async function carregarConversas() {
+  if (!me) return;
+  const { data, error } = await sb.from("bitrix_sessoes").select("*").eq("encerrada", false).not("operador", "is", null).not("situacao", "is", null).order("ultima_msg_em", { ascending: false }).limit(500);
+  if (error) { $("#cvAtual").textContent = "Aba indisponível: rode o supabase/003_conversas.sql. (" + error.message + ")"; return; }
+  conversas = data || []; renderConversas();
+}
+function renderConversas() {
+  if (!me) return;
+  const sel = $("#cvPessoa");
+  if (isSup()) {
+    if (!sel.options.length) { sel.innerHTML = `<option value="">Toda a equipe</option>` + auxiliaresEquipe().map(p => `<option value="${p.id}"${p.id === me.id ? " selected" : ""}>${esc(p.nome)}</option>`).join(""); sel.onchange = renderConversas; }
+    cvPessoa = sel.value || null;
+  } else cvPessoa = me.id;
+  const minhas = conversas.filter(c => !cvPessoa || c.operador === cvPessoa);
+  const urg = conversas.filter(c => c.operador === me.id && ["sem_resposta", "promessa", "nova", "chamado"].includes(c.situacao)).length;
+  $("#navConv").hidden = !urg; $("#navConv").textContent = urg;
+  const cnt = k => minhas.filter(c => c.situacao === k).length;
+  $("#cvKpis").innerHTML = ORDEM_CV.map(k => `<div class="kpi clicavel ${CV[k][2] === "crit" && cnt(k) ? "alerta" : CV[k][2] === "warn" && cnt(k) ? "warn" : k === "em_dia" ? "ok" : "info"}${cvFiltro === k ? " sel" : ""}" data-cv="${k}" role="button" tabindex="0"><span>${CV[k][0]}</span><b class="v">${cnt(k)}</b></div>`).join("");
+  $$("#cvKpis [data-cv]").forEach(e => e.onclick = () => { cvFiltro = cvFiltro === e.dataset.cv ? "" : e.dataset.cv; renderConversas(); });
+  const grupos = ORDEM_CV.filter(k => !cvFiltro || k === cvFiltro).map(k => {
+    const itens = minhas.filter(c => c.situacao === k).sort((a, b) => Date.parse(a.cliente_desde || a.ultima_msg_em || 0) - Date.parse(b.cliente_desde || b.ultima_msg_em || 0));
+    if (!itens.length) return "";
+    const aberto = k !== "em_dia" || cvFiltro === "em_dia";
+    return `<details class="card" ${aberto ? "open" : ""}><summary style="cursor:pointer;font-family:var(--display);font-weight:700;font-size:18px">${CV[k][0]} · ${itens.length}</summary><div>${itens.map(c => linhaConversa(c, k)).join("")}</div></details>`;
+  }).join("");
+  $("#cvGrupos").innerHTML = grupos || '<div class="card"><p class="lead" style="margin:0">Nenhuma conversa aberta no momento.</p></div>';
+  const ult = conversas.map(c => c.atualizada_em).filter(Boolean).sort().at(-1);
+  $("#cvAtual").textContent = ult ? `Atualizado há ${haQuanto(ult)}.` : "";
+}
+function linhaConversa(c, k) {
+  const at = c.atendimento_id ? lista.find(a => a.id === c.atendimento_id) : lista.find(a => a.bitrix_sessao === c.sessao && !FINAIS.includes(a.status));
+  const espera = k === "sem_resposta" || k === "responder" || k === "nova" ? `cliente esperando há ${haQuanto(c.cliente_desde || c.ultima_msg_em)}` : k === "promessa" ? `prometido há ${haQuanto(c.ultima_msg_em)}` : k === "chamado" ? `última atualização há ${haQuanto(c.ultima_resposta_em)}` : `última mensagem há ${haQuanto(c.ultima_msg_em)}`;
+  return `<div class="cv"><span class="bar" style="background:${CV[k][1]}"></span>
+    <div><div class="tt"><b>${esc(c.cliente || c.nome || "Cliente")}</b><span class="pill">nº ${c.sessao}</span>${at ? `<span class="pill ok">#${at.id}${at.os_numero ? " · O.S. " + esc(at.os_numero) : ""}</span>` : ""}${isSup() && !cvPessoa ? `<span class="pill">${esc(perfis[c.operador]?.nome || "")}</span>` : ""}<span class="salvo">${espera}</span></div>
+    <div class="txt">${esc(c.ultimo_texto || "(arquivo, áudio ou imagem)")}</div></div>
+    <div class="acoes"><a class="btn sm" href="https://nebulize.bitrix24.com.br/online/?IM_DIALOG=chat${c.chat_id}" target="_blank" rel="noopener">Abrir no Bitrix</a>
+    ${at ? `<button class="btn sm" type="button" data-cvat="${at.id}">Atendimento</button>` : `<button class="btn sm" type="button" data-cvreg="${c.sessao}">Registrar</button>`}
+    ${k !== "em_dia" ? `<button class="btn sm pri" type="button" data-cvok="${c.sessao}">✓ Resolvido</button>` : ""}</div></div>`;
+}
+$("#cvGrupos").addEventListener("click", async e => {
+  const a = e.target.closest("[data-cvat]"); if (a) return abrirAtendimento(Number(a.dataset.cvat), true);
+  const r = e.target.closest("[data-cvreg]");
+  if (r) { abrirNovo(); $("#n_bitrix").value = r.dataset.cvreg; $("#n_canal").value = "Bitrix"; return; }
+  const ok = e.target.closest("[data-cvok]");
+  if (ok) {
+    const c = conversas.find(x => x.sessao === Number(ok.dataset.cvok)); if (!c) return;
+    const { error } = await sb.from("bitrix_sessoes").update({ resolvido_msg_id: c.ultimo_msg_id, situacao: "em_dia" }).eq("sessao", c.sessao);
+    if (error) { toast(error.message); return; }
+    c.resolvido_msg_id = c.ultimo_msg_id; c.situacao = "em_dia"; renderConversas(); toast("Marcada como resolvida até chegar mensagem nova");
+  }
+});
+const auxiliaresEquipe = () => Object.values(perfis).filter(p => p.ativo);
+setInterval(() => { if (me && location.hash === "#conversas") carregarConversas(); }, 60000);
+
 /* ================= NOTIFICAÇÕES ================= */
 async function carregarNotifs() {
   const { data } = await sb.from("notificacoes").select("*").eq("usuario_id", me.id).order("id", { ascending: false }).limit(50);
@@ -381,6 +445,7 @@ function assinarRealtime() {
     try { if ("Notification" in window && Notification.permission === "granted") new Notification(p.new.titulo, { body: p.new.mensagem || "", icon: LOGO }); } catch (e) {}
     if (p.new.atendimento_id) carregarLista().then(() => { if (A && A.id === p.new.atendimento_id) abrirAtendimento(A.id, false); else renderLista(); });
   }).subscribe();
+  sb.channel("conversas").on("postgres_changes", { event: "*", schema: "public", table: "bitrix_sessoes" }, () => { clearTimeout(window._cvT); window._cvT = setTimeout(carregarConversas, 1500); }).subscribe();
 }
 // lembrete local: a cada 30 min, se houver atendimentos meus parados há 3+ dias
 setInterval(() => {
@@ -652,7 +717,7 @@ $("#btnCsv").onclick = () => {
 };
 
 /* ================= ROTAS ================= */
-const VIEWS = ["atendimentos", "atendimento", "dashboard", "relatorio", "inicio", "recepcao", "identificacao", "testes", "chamado", "fora-garantia", "rma", "acompanhamento", "tecnicos", "emails", "videos", "supervisor"];
+const VIEWS = ["atendimentos", "conversas", "atendimento", "dashboard", "relatorio", "inicio", "recepcao", "identificacao", "testes", "chamado", "fora-garantia", "rma", "acompanhamento", "tecnicos", "emails", "videos", "supervisor"];
 function route() {
   const h = (location.hash || "").slice(1);
   let cur = VIEWS.includes(h) ? h : "atendimentos";
@@ -663,6 +728,7 @@ function route() {
   if (cur === "relatorio") renderRelatorio();
   if (cur === "atendimento") carregarEventos();
   if (cur === "atendimentos") renderLista();
+  if (cur === "conversas") carregarConversas();
   window.scrollTo(0, 0);
 }
 window.addEventListener("hashchange", route);

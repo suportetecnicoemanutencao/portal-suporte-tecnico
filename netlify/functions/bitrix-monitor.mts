@@ -1,6 +1,7 @@
 import type { Config } from "@netlify/functions"
 import { admin, bitrix } from "../lib/comum.mts"
 import { lerConversa, montarUpdate, mensagensDoHistorico, extrair, acharSaudacao } from "../lib/bitrix-conversa.mts"
+import { acompanharConversas } from "../lib/conversas.mts"
 
 /**
  * Roda a cada 5 minutos.
@@ -47,6 +48,19 @@ export default async () => {
   }
   if (maior > ultima) await db.from("config_portal").upsert({ chave: "bitrix_ultima_sessao", valor: maior, atualizado_em: new Date().toISOString() })
 
+  // carga inicial (uma vez): conversas dos últimos dias que ainda podem estar abertas, para a aba "Minhas conversas"
+  const { data: bk } = await db.from("config_portal").select("valor").eq("chave", "bitrix_carga_inicial").maybeSingle()
+  if (!bk && maior && tempoOk()) {
+    for (let s0 = Math.max(1, maior - 400); s0 < ultima && tempoOk(); s0 += 40) {
+      const cmd: Record<string, string> = {}
+      for (let s = s0; s < Math.min(s0 + 40, ultima + 1); s++) cmd["s" + s] = `imopenlines.dialog.get?SESSION_ID=${s}`
+      const { ok } = await batch(cmd)
+      const achadas = Object.entries(ok).map(([k, d]) => ({ sessao: Number(k.slice(1)), chat_id: Number(d.id) || null, nome: d.name || null, status: "ignorada" }))
+      if (achadas.length) await db.from("bitrix_sessoes").upsert(achadas, { onConflict: "sessao", ignoreDuplicates: true })
+    }
+    if (tempoOk()) await db.from("config_portal").upsert({ chave: "bitrix_carga_inicial", valor: true })
+  }
+
   // ---------- 2) saudação → abrir atendimento ----------
   const limite = new Date(Date.now() - 48 * 3600e3).toISOString()
   await db.from("bitrix_sessoes").update({ status: "ignorada" }).eq("status", "pendente").lt("descoberta_em", limite)
@@ -88,7 +102,11 @@ export default async () => {
     }
   }
 
-  // ---------- 3) reler atendimentos em aberto ----------
+  // ---------- 3) Minhas conversas: situação + avisos ----------
+  let conv = { conversas: 0, avisos: 0 }
+  if (tempoOk()) { try { conv = await acompanharConversas(db, tempoOk) } catch (e) { console.error("conversas", (e as Error).message) } }
+
+  // ---------- 4) reler atendimentos em aberto ----------
   let atualizados = 0
   if (tempoOk()) {
     const { data: abertosAt } = await db.from("atendimentos").select("*").not("bitrix_sessao", "is", null).not("status", "in", FINAIS).limit(1000)
@@ -125,7 +143,7 @@ export default async () => {
       }
     }
   }
-  console.log(`monitor: última sessão ${maior}, abertos ${abertos}, atualizados ${atualizados}`)
+  console.log(`monitor: última sessão ${maior}, abertos ${abertos}, conversas ${conv.conversas}, avisos ${conv.avisos}, atualizados ${atualizados}`)
 }
 
 export const config: Config = { schedule: "*/5 * * * *" }

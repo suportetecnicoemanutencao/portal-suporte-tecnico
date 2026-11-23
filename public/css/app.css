@@ -214,3 +214,14 @@ table.lista td.cl{white-space:normal;min-width:180px}
   section.view{display:none!important} section.view.on{display:flex!important}
   body{background:#fff;color:#000} .card{border:1px solid #ccc;break-inside:avoid}
 }
+
+/* Minhas conversas */
+.kpi.clicavel{cursor:pointer} .kpi.sel{outline:3px solid var(--leaf)}
+.cv{display:grid;grid-template-columns:6px 1fr auto;gap:12px;align-items:start;padding:12px 0;border-bottom:1px solid var(--line)}
+.cv:last-child{border-bottom:0}
+.cv .bar{align-self:stretch;border-radius:3px}
+.cv .tt{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.cv .tt b{font-family:var(--display)}
+.cv .txt{color:var(--muted);font-size:14px;margin-top:2px;overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+.cv .acoes{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}
+@media (max-width:640px){.cv{grid-template-columns:6px 1fr}.cv .acoes{grid-column:2;justify-content:flex-start}}
