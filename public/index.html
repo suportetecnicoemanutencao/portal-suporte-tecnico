@@ -50,7 +50,7 @@
 <!-- ATENDIMENTOS -->
 <section class="view" id="v-atendimentos">
   <div class="banner">
-    <div style="flex:1;min-width:240px"><h1>Atendimentos</h1><p class="lead">Registre o atendimento <b>antes</b> de iniciar a conversa. Ao informar o nº da conversa do Bitrix, o portal vincula a conversa e o cliente automaticamente.</p></div>
+    <div style="flex:1;min-width:240px"><h1>Atendimentos</h1><p class="lead">Ao se apresentar no Bitrix ("…Suporte Técnico Nebulize, me chamo <i>seu nome</i>"), o atendimento é aberto aqui automaticamente em até 5 minutos. Também dá para registrar à mão e informar o nº da conversa: o portal lê a conversa e preenche cliente, CNPJ, nº de série e O.S.</p></div>
     <button class="btn pri" id="btnNovo" type="button">+ Registrar atendimento</button>
   </div>
   <div class="kpis" id="kpisLista"></div>
@@ -60,7 +60,7 @@
       <select id="fEscopo" aria-label="De quem"><option value="meus">Meus</option><option value="todos">Todos</option></select>
       <select id="fStatus" aria-label="Status"><option value="abertos">Em andamento</option><option value="parados">Parados há 3+ dias</option><option value="finalizados">Finalizados</option><option value="todos">Todos os status</option></select>
       <select id="fTipo" aria-label="Tipo"><option value="">Todos os tipos</option><option>Aluguel</option><option>Venda em garantia</option><option>Venda fora de garantia</option></select>
-      <input id="fBusca" type="search" placeholder="Buscar cliente, nº Bitrix, O.S." style="flex:1;min-width:200px">
+      <input id="fBusca" type="search" placeholder="Buscar cliente, nº da conversa, O.S., série, CNPJ" style="flex:1;min-width:200px">
     </div>
     <div class="tw"><table class="lista"><thead><tr><th>#</th><th>Cliente</th><th>Tipo</th><th>Modelo</th><th>Status</th><th>Atendente</th><th>Bitrix</th><th>O.S.</th><th>Parado</th></tr></thead><tbody id="tbLista"></tbody></table></div>
     <p class="lead" id="listaVazia" hidden>Nenhum atendimento neste filtro.</p>

@@ -128,7 +128,7 @@ function filtrada() {
     if (st === "finalizados" && !fim) return false;
     if (st === "parados" && (fim || diasParado(a) < 3)) return false;
     if (tp && a.tipo !== tp) return false;
-    if (q && ![a.id, a.cliente, a.contato, a.bitrix_sessao, a.os_numero, a.modelo].join(" ").toLowerCase().includes(q)) return false;
+    if (q && ![a.id, a.cliente, a.contato, a.bitrix_sessao, a.os_numero, a.modelo, a.numero_serie, a.cnpj].join(" ").toLowerCase().includes(q)) return false;
     return true;
   });
 }
@@ -153,7 +153,7 @@ function renderLista() {
   $("#listaVazia").hidden = rows.length > 0;
   $("#tbLista").innerHTML = rows.map(a => {
     const d = diasParado(a), fim = FINAIS.includes(a.status);
-    return `<tr data-id="${a.id}"><td class="num">#${a.id}</td><td class="cl">${esc(a.cliente || "—")}<br><small class="lead" style="font-size:12px">${esc(a.contato || "")}</small></td>
+    return `<tr data-id="${a.id}"><td class="num">#${a.id}</td><td class="cl">${esc(a.cliente || "—")}${a.origem === "bitrix_auto" ? ' <span class="pill info" title="Aberto automaticamente pela saudação no Bitrix">auto</span>' : ""}<br><small class="lead" style="font-size:12px">${esc(a.contato || "")}</small></td>
       <td>${esc(a.tipo || "—")}</td><td>${esc(a.modelo || "—")}</td><td>${stPill(a.status)}</td>
       <td>${esc(perfis[a.criado_por]?.nome || "")}</td><td class="num">${a.bitrix_sessao ? (a.bitrix_link ? `<a href="${esc(a.bitrix_link)}" target="_blank" rel="noopener">${a.bitrix_sessao}</a>` : a.bitrix_sessao) : "—"}</td>
       <td class="num">${esc(a.os_numero || "—")}${a.os_status ? `<br><small class="lead" style="font-size:12px">${esc(a.os_status)}</small>` : ""}</td>
@@ -222,7 +222,7 @@ const CAMPOS = [
   ["cliente", "Cliente / loja"], ["contato", "Nº da conversa ou telefone"],
   ["canal", "Canal de entrada", ["Bitrix", "WhatsApp técnico", "Comercial", "Ligação direta"]],
   ["modelo", "Modelo", null], ["tipo", "Tipo", TIPOS],
-  ["endereco", "Endereço onde a máquina está instalada", null, "full"], ["cnpj", "CNPJ para cobrança"], ["email_nf", "E-mail para envio das notas"],
+  ["numero_serie", "Nº de série"], ["endereco", "Endereço onde a máquina está instalada", null, "full"], ["cnpj", "CNPJ para cobrança"], ["email_nf", "E-mail para envio das notas"],
   ["nf_data", "Data da NF de venda", "date"], ["video_recebido", "Vídeo da primeira análise recebido?", "bool"],
   ["observacoes", "Observações", "area", "full"],
 ];
@@ -235,7 +235,7 @@ function renderAtendimento() {
   if (!tem) return;
   const ed = podeEditar(A);
   $("#atTitulo").textContent = `Atendimento #${A.id}`;
-  $("#atSub").innerHTML = `${esc(A.cliente || "Cliente a identificar")} · aberto por ${esc(perfis[A.criado_por]?.nome || "")} em ${fmtDH(A.created_at)} · ${stPill(A.status)}${ed ? "" : ' · <span class="pill warn">somente leitura</span>'}`;
+  $("#atSub").innerHTML = `${A.origem === "bitrix_auto" ? '<span class="pill info">Aberto automaticamente</span> ' : ""}${esc(A.cliente || "Cliente a identificar")} · aberto por ${esc(perfis[A.criado_por]?.nome || "")} em ${fmtDH(A.created_at)} · ${stPill(A.status)}${ed ? "" : ' · <span class="pill warn">somente leitura</span>'}`;
   $("#atStatus").innerHTML = Object.entries(STATUS).map(([k, l]) => `<option value="${k}"${A.status === k ? " selected" : ""}>${l}</option>`).join("");
   $("#atStatus").disabled = !ed;
   const fim = FINAIS.includes(A.status);
@@ -252,6 +252,9 @@ function renderAtendimento() {
     else if (tipo === "area") { el = document.createElement("textarea"); el.rows = 2; el.value = A[k] || ""; }
     else { el = document.createElement("input"); el.type = tipo === "date" ? "date" : "text"; el.value = A[k] || ""; }
     el.id = "a_" + k; el.disabled = !ed;
+    const ext = A.bitrix_dados?.extraidos || {};
+    const doBx = (k === "cliente" && A.bitrix_dados?.cliente) || (ext[k] && String(A[k] || "") === String(ext[k]));
+    if (doBx) { lab.innerHTML = `<span>${esc(l)} <span class="pill info" style="font-size:11px;padding:0 7px" title="${esc(A.bitrix_dados?.fontes?.[k] || "Capturado da conversa")}">do Bitrix</span></span>`; }
     el.addEventListener(el.tagName === "SELECT" || el.type === "date" ? "change" : "input", () => {
       let val = el.value; if (tipo === "bool") val = val === "true"; if (val === "") val = null;
       if (k === "modelo") { const key = Object.keys(MODELS).find(x => MODELS[x].name === val); if (key) ui.model = key; }
@@ -275,8 +278,10 @@ function renderAtendimento() {
       <div><dt>Cliente no CRM</dt><dd>${esc(d.cliente || "—")}${d.empresa ? "<br>" + esc(d.empresa) : ""}</dd></div>
       <div><dt>Telefone</dt><dd>${esc(d.telefone || "—")}</dd></div>
       <div><dt>Canal</dt><dd>${esc(d.nome_conversa || d.assunto || "—")}</dd></div>
-    </dl><div class="filtros">${A.bitrix_link ? `<a class="btn sm" href="${esc(A.bitrix_link)}" target="_blank" rel="noopener">Abrir conversa no Bitrix</a>` : ""}${d.crm_url ? `<a class="btn sm" href="${esc(d.crm_url)}" target="_blank" rel="noopener">Abrir no CRM</a>` : ""}<span class="salvo">vinculada em ${fmtDH(A.bitrix_vinculado_em)}</span></div>`
+      <div><dt>Mensagens lidas</dt><dd>${esc(d.mensagens ?? "—")}${d.lido_em ? " · " + fmtDH(d.lido_em) : ""}</dd></div>
+    </dl>${capturadosHTML(d)}<div class="filtros"><button class="btn sm" type="button" id="bxAtualizar"${ed ? "" : " disabled"}>Atualizar do Bitrix</button>${A.bitrix_link ? `<a class="btn sm" href="${esc(A.bitrix_link)}" target="_blank" rel="noopener">Abrir conversa no Bitrix</a>` : ""}${d.crm_url ? `<a class="btn sm" href="${esc(d.crm_url)}" target="_blank" rel="noopener">Abrir no CRM</a>` : ""}<span class="salvo">vinculada em ${fmtDH(A.bitrix_vinculado_em)}</span></div>`
     : `<p class="lead" style="margin:0;font-size:14px">Informe o nº da conversa do Canal Aberto e clique em Vincular. O portal busca o cliente e o telefone no Bitrix.</p>`;
+  const bxa = $("#bxAtualizar"); if (bxa) bxa.onclick = () => { $("#bxNumero").value = A.bitrix_sessao; vincularBitrix(); };
   // pós
   $("#a_pos").checked = !!A.pos_atendimento; $("#a_pos").disabled = !ed; $("#a_pos").onchange = () => patch({ pos_atendimento: $("#a_pos").checked }, true);
   $("#a_rma").checked = !!A.rma; $("#a_rma").disabled = !ed; $("#a_rma").onchange = () => patch({ rma: $("#a_rma").checked }, true);
@@ -284,6 +289,12 @@ function renderAtendimento() {
   $$("#estrelas button").forEach(b => b.onclick = () => { patch({ satisfacao: Number(b.dataset.n) }, true); renderAtendimento(); });
   // próximo passo
   $("#atProx").innerHTML = proximoPasso();
+}
+const ROT = { cnpj: "CNPJ", numero_serie: "Nº de série", os_numero: "O.S.", email_nf: "E-mail", endereco: "Endereço", modelo: "Modelo", telefone: "Telefone", atendente_nome: "Saudação de" };
+function capturadosHTML(d) {
+  const e = d?.extraidos || {}; const ks = Object.keys(ROT).filter(k => e[k]);
+  if (!ks.length) return '<p class="lead" style="margin:0 0 8px;font-size:14px">Nenhum CNPJ, nº de série ou O.S. encontrado na conversa ainda. O portal relê a conversa a cada 5 minutos.</p>';
+  return `<div style="margin:0 0 8px"><b style="font-size:12px;color:var(--muted);text-transform:uppercase">Encontrado na conversa</b><div class="fichamini" style="margin-top:4px">${ks.map(k => `<span title="${esc(d.fontes?.[k] || "")}"><b>${ROT[k]}:</b> ${esc(e[k])}</span>`).join("")}</div></div>`;
 }
 function proximoPasso() {
   const passos = [];
@@ -323,7 +334,7 @@ async function vincularBitrix() {
     const j = await r.json().catch(() => ({ erro: "Resposta inválida do servidor" }));
     if (!r.ok) throw new Error(j.erro || j.errorMessage || `Falha ao vincular (erro ${r.status})`);
     A = { ...j.atendimento }; const i = lista.findIndex(x => x.id === A.id); if (i >= 0) lista[i] = j.atendimento;
-    toast("Conversa vinculada"); renderAll(true); carregarEventos();
+    toast(j.capturados?.length ? "Capturado: " + j.capturados.join(", ") : "Conversa lida · nenhum dado novo"); renderAll(true); carregarEventos();
   } catch (e) { $("#bxErr").textContent = e.message; }
   $("#bxVincular").disabled = false; $("#bxVincular").textContent = "Vincular";
 }
@@ -490,7 +501,7 @@ function renderChamado() {
   const testes = Object.values(A?.testes || {});
   $("#chamadoOut").textContent = `CLIENTE: ${v("cliente", "[nome do cliente]")}
 CONTATO: ${A?.bitrix_sessao ? "Conversa Bitrix nº " + A.bitrix_sessao + (A.bitrix_dados?.telefone ? " · " + A.bitrix_dados.telefone : "") : v("contato", "[nº conversa Bitrix ou telefone]")} (canal: ${v("canal", "Bitrix")})
-EQUIPAMENTO: ${v("modelo", "[modelo]")} · ${v("tipo", "[aluguel / venda em garantia]")}
+EQUIPAMENTO: ${v("modelo", "[modelo]")} · ${v("tipo", "[aluguel / venda em garantia]")}${F("numero_serie") ? " · Nº de série " + F("numero_serie") : ""}
 ENDEREÇO: ${v("endereco", "[endereço completo]")}
 
 MOTIVO DA ABERTURA:

@@ -6,9 +6,10 @@ App do Suporte Técnico: registro de atendimentos, guia passo a passo para as au
 
 ```
 public/                 site (index.html, css, js)
-netlify/functions/      bitrix-vincular · infraspeak-webhook · lembretes (agendada)
+netlify/functions/      bitrix-vincular · bitrix-monitor (a cada 5 min) · infraspeak-webhook · lembretes (agendada)
 netlify/lib/            código comum das funções
 supabase/schema.sql     tabelas, regras de acesso (RLS) e gatilhos
+supabase/002_bitrix_automatico.sql   atualização: abertura automática e captura de dados do Bitrix
 scripts/                gerar-config (build) · criar-usuarios
 ```
 
@@ -73,6 +74,13 @@ No Infraspeak, cadastre o webhook para os eventos de **O.S. criada** e **O.S. co
 https://SEU-SITE.netlify.app/api/infraspeak/webhook?token=SEU_INFRASPEAK_WEBHOOK_TOKEN
 ```
 Abrir esse endereço no navegador deve responder `{"ok":true,...}`. Cada aviso recebido fica gravado na tabela `infraspeak_eventos`; o portal procura o nº da O.S. informado no atendimento e avisa a auxiliar (O.S. confirmada / O.S. fechada → fazer pós-atendimento).
+
+## Automação com o Bitrix (atualização 002)
+Rode `supabase/002_bitrix_automatico.sql` no SQL Editor (uma vez).
+
+- **Abertura automática:** a função `bitrix-monitor` (a cada 5 min) acompanha as conversas novas do Canal Aberto. Quando a auxiliar se apresenta com *"Olá, tudo bem? Você está falando com o Suporte Técnico Nebulize, me chamo Katielen."* (também reconhece "meu nome é Katielen" ou "sou a Katielen, do Suporte Técnico"), o atendimento é aberto no portal para ela, já vinculado à conversa, e ela recebe uma notificação.
+  O nome da saudação é comparado com `perfis.nome_bitrix` (por padrão, o primeiro nome do perfil).
+- **Captura de dados:** ao vincular (ou clicar em *Atualizar do Bitrix*) e a cada 5 min nos atendimentos em aberto, o portal lê as mensagens da conversa e preenche os campos vazios: cliente, telefone, **CNPJ** (com dígito verificador), **nº de série** (padrão NBV… ou resposta ao pedido do nº de série), **nº da O.S.** ("ordem de serviço nº …"), e-mail, endereço e modelo. O que a auxiliar digitou nunca é sobrescrito; os campos capturados aparecem com a etiqueta *do Bitrix*.
 
 ## Como funciona no dia a dia
 1. **Registrar atendimento** antes de iniciar a conversa (canal, tipo, modelo; o nº do Bitrix pode vir depois).
