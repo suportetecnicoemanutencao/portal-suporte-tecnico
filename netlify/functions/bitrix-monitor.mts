@@ -4,7 +4,7 @@ import { lerConversa, montarUpdate, mensagensDoHistorico, extrair, acharSaudacao
 import { acompanharConversas } from "../lib/conversas.mts"
 
 /**
- * Roda a cada 5 minutos.
+ * Roda a cada 1 minuto (o portal recebe as mudanças em tempo real pelo Supabase).
  * 1) Descobre sessões novas do Canal Aberto (os números são sequenciais).
  * 2) Procura a saudação "Suporte Técnico Nebulize, me chamo <Nome>" e abre o atendimento
  *    automaticamente para a usuária com esse nome, já com os dados lidos da conversa.
@@ -146,4 +146,4 @@ export default async () => {
   console.log(`monitor: última sessão ${maior}, abertos ${abertos}, conversas ${conv.conversas}, avisos ${conv.avisos}, atualizados ${atualizados}`)
 }
 
-export const config: Config = { schedule: "*/5 * * * *" }
+export const config: Config = { schedule: "* * * * *" }  // a cada 1 min (mínimo do Netlify)
