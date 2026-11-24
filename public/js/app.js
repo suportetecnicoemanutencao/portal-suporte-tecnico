@@ -381,14 +381,42 @@ $("#btnNota").onclick = async () => {
 };
 
 /* ================= MINHAS CONVERSAS ================= */
-let conversas = [], cvFiltro = "", cvPessoa = null;
+let conversas = [], cvFiltro = "", cvPessoa = null, cvBuscaTxt = "", cvPausaSessao = null;
 const CV = {
+  pedido: ["Pedido prometido", "var(--crit)", "crit"],
   sem_resposta: ["Sem resposta há +4 h", "var(--crit)", "crit"], promessa: ["Promessa pendente", "var(--warn)", "warn"],
   nova: ["Novas", "var(--info)", "info"], chamado: ["Chamado a atualizar", "#7a4fd0", "warn"],
+  retornar: ["Retornar ao cliente", "var(--warn)", "warn"],
   responder: ["Cliente aguardando", "var(--leaf)", ""], em_dia: ["Em dia", "var(--line)", "ok"],
 };
-const ORDEM_CV = ["sem_resposta", "promessa", "nova", "chamado", "responder", "em_dia"];
+const ORDEM_CV = ["pedido", "sem_resposta", "promessa", "nova", "chamado", "retornar", "responder", "em_dia"];
+const ICO_PAUSA = '<svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><line x1="4.5" y1="2.5" x2="4.5" y2="11.5"/><line x1="9.5" y1="2.5" x2="9.5" y2="11.5"/></svg>';
+const ICO_RETOMAR = '<svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor" aria-hidden="true"><path d="M4 2.5v9l7-4.5z"/></svg>';
+/** pausada até chegar mensagem mais nova que a do momento da pausa */
+const estaPausada = c => !!c.pausado_em && (Number(c.ultimo_msg_id) || 0) <= (Number(c.pausado_msg_id) || 0);
+/** pedido de cobrança citado no chat ainda não baixado */
+const cobAuto = c => !!c.cobranca_msg_id && !(c.cobranca_feita_msg_id && c.cobranca_feita_msg_id >= c.cobranca_msg_id);
+const atDaConversa = c => c.atendimento_id ? lista.find(a => a.id === c.atendimento_id) : lista.find(a => a.bitrix_sessao === c.sessao && !FINAIS.includes(a.status));
+const semAcento = t => String(t ?? "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
 function haQuanto(d) { if (!d) return ""; const m = Math.max(0, Math.round((Date.now() - Date.parse(d)) / 60000)); return m < 60 ? `${m} min` : m < 1440 ? `${Math.floor(m / 60)} h ${m % 60 ? (m % 60) + " min" : ""}`.trim() : `${Math.floor(m / 1440)} d ${Math.floor((m % 1440) / 60)} h`; }
+
+/* Exibir mensagens: Vertical (lista) ou Horizontal (cards lado a lado) — salvo no perfil */
+const cvLayout = () => me?.preferencias?.cv_layout || ui.cvLayout || "vertical";
+function aplicarLayoutCv() {
+  const l = cvLayout();
+  $("#cvGrupos").classList.toggle("cv-h", l === "horizontal");
+  $$("[data-cvlay]").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.cvlay === l)));
+}
+$$("[data-cvlay]").forEach(b => b.onclick = async () => {
+  const l = b.dataset.cvlay; if (l === cvLayout()) return;
+  ui.cvLayout = l; saveUi();
+  if (!me) return aplicarLayoutCv();
+  me.preferencias = { ...(me.preferencias || {}), cv_layout: l }; aplicarLayoutCv();
+  const { error } = await sb.from("perfis").update({ preferencias: me.preferencias }).eq("id", me.id);
+  if (error) console.warn("preferências não salvas no perfil (rode o 005):", error.message);
+});
+$("#cvBusca").addEventListener("input", e => { cvBuscaTxt = e.target.value; renderConversas(); });
+
 async function carregarConversas() {
   if (!me) return;
   const { data, error } = await sb.from("bitrix_sessoes").select("*").eq("encerrada", false).not("operador", "is", null).not("situacao", "is", null).order("ultima_msg_em", { ascending: false }).limit(500);
@@ -397,68 +425,125 @@ async function carregarConversas() {
 }
 function renderConversas() {
   if (!me) return;
+  aplicarLayoutCv();
   const sel = $("#cvPessoa");
   if (isSup()) {
     if (!sel.options.length) { sel.innerHTML = `<option value="">Toda a equipe</option>` + auxiliaresEquipe().map(p => `<option value="${p.id}"${p.id === me.id ? " selected" : ""}>${esc(p.nome)}</option>`).join(""); sel.onchange = renderConversas; }
     cvPessoa = sel.value || null;
   } else cvPessoa = me.id;
-  const minhas = conversas.filter(c => !cvPessoa || c.operador === cvPessoa);
-  const urg = conversas.filter(c => c.operador === me.id && (["sem_resposta", "promessa", "nova", "chamado"].includes(c.situacao) || c.cobranca)).length;
+  const q = semAcento(cvBuscaTxt.trim());
+  const casa = c => { if (!q) return true; const at = atDaConversa(c); return semAcento([c.cliente, c.nome, c.sessao, c.ultimo_texto, c.pausado_motivo, c.cobranca_texto, at?.id, at?.os_numero].join(" ")).includes(q); };
+  const daPessoa = conversas.filter(c => !cvPessoa || c.operador === cvPessoa);
+  const pausadas = daPessoa.filter(estaPausada);
+  const minhas = daPessoa.filter(c => !estaPausada(c));
+  const urg = conversas.filter(c => c.operador === me.id && !estaPausada(c) && (["pedido", "sem_resposta", "promessa", "nova", "chamado"].includes(c.situacao) || c.cobranca)).length;
   $("#navConv").hidden = !urg; $("#navConv").textContent = urg;
   const cnt = k => minhas.filter(c => c.situacao === k).length;
   const nCob = minhas.filter(c => c.cobranca).length;
-  $("#cvKpis").innerHTML = `<div class="kpi clicavel ${nCob ? "alerta" : "ok"}${cvFiltro === "cobranca" ? " sel" : ""}" data-cv="cobranca" role="button" tabindex="0"><span>Cobranças a fazer</span><b class="v">${nCob}</b></div>` + ORDEM_CV.map(k => `<div class="kpi clicavel ${CV[k][2] === "crit" && cnt(k) ? "alerta" : CV[k][2] === "warn" && cnt(k) ? "warn" : k === "em_dia" ? "ok" : "info"}${cvFiltro === k ? " sel" : ""}" data-cv="${k}" role="button" tabindex="0"><span>${CV[k][0]}</span><b class="v">${cnt(k)}</b></div>`).join("");
+  const kpi = (k, rotulo, n, cls) => `<div class="kpi clicavel ${cls}${cvFiltro === k ? " sel" : ""}" data-cv="${k}" role="button" tabindex="0"><span>${rotulo}</span><b class="v">${n}</b></div>`;
+  $("#cvKpis").innerHTML = kpi("cobranca", "Cobranças a fazer", nCob, nCob ? "alerta" : "ok")
+    + ORDEM_CV.map(k => kpi(k, CV[k][0], cnt(k), CV[k][2] === "crit" && cnt(k) ? "alerta" : CV[k][2] === "warn" && cnt(k) ? "warn" : k === "em_dia" ? "ok" : "info")).join("")
+    + kpi("pausado", "Pausadas", pausadas.length, "info");
   $$("#cvKpis [data-cv]").forEach(e => e.onclick = () => { cvFiltro = cvFiltro === e.dataset.cv ? "" : e.dataset.cv; renderConversas(); });
-  const blocoCob = cvFiltro === "cobranca" || (!cvFiltro && nCob) ? (() => {
-    const itens = minhas.filter(c => c.cobranca).sort((a, b) => Date.parse(a.cobranca_em || 0) - Date.parse(b.cobranca_em || 0));
-    return itens.length ? `<details class="card" open style="border-left:5px solid var(--crit)"><summary style="cursor:pointer;font-family:var(--display);font-weight:700;font-size:18px">Cobranças a fazer · ${itens.length}</summary><div>${itens.map(c => linhaConversa(c, c.situacao || "em_dia", true)).join("")}</div></details>` : '<div class="card"><p class="lead" style="margin:0">Nenhuma cobrança pendente.</p></div>';
-  })() : "";
-  const grupos = blocoCob + ORDEM_CV.filter(k => !cvFiltro || k === cvFiltro).map(k => {
-    const itens = minhas.filter(c => c.situacao === k).sort((a, b) => Date.parse(a.cliente_desde || a.ultima_msg_em || 0) - Date.parse(b.cliente_desde || b.ultima_msg_em || 0));
-    if (!itens.length) return "";
-    const aberto = k !== "em_dia" || cvFiltro === "em_dia";
-    return `<details class="card" ${aberto ? "open" : ""}><summary style="cursor:pointer;font-family:var(--display);font-weight:700;font-size:18px">${CV[k][0]} · ${itens.length}</summary><div>${itens.map(c => linhaConversa(c, k)).join("")}</div></details>`;
+  const bloco = (titulo, itens, html, aberto, borda) => `<details class="card" ${aberto ? "open" : ""}${borda ? ` style="border-left:5px solid ${borda}"` : ""}><summary style="cursor:pointer;font-family:var(--display);font-weight:700;font-size:18px">${titulo} · ${itens.length}</summary><div>${itens.map(html).join("")}</div></details>`;
+  const cobItens = minhas.filter(c => c.cobranca && casa(c)).sort((a, b) => Date.parse(a.cobranca_em || a.cobranca_manual_em || 0) - Date.parse(b.cobranca_em || b.cobranca_manual_em || 0));
+  const blocoCob = cvFiltro === "cobranca" || (!cvFiltro && cobItens.length)
+    ? (cobItens.length ? bloco("Cobranças a fazer", cobItens, c => linhaConversa(c, c.situacao || "em_dia", true), true, "var(--crit)") : "")
+    : "";
+  const grupos = ORDEM_CV.filter(k => !cvFiltro || k === cvFiltro).map(k => {
+    const itens = minhas.filter(c => c.situacao === k && casa(c)).sort((a, b) => Date.parse(a.cliente_desde || a.ultima_msg_em || 0) - Date.parse(b.cliente_desde || b.ultima_msg_em || 0));
+    return itens.length ? bloco(CV[k][0], itens, c => linhaConversa(c, k), k !== "em_dia" || cvFiltro === "em_dia") : "";
   }).join("");
-  $("#cvGrupos").innerHTML = (cvFiltro === "cobranca" ? blocoCob : grupos) || '<div class="card"><p class="lead" style="margin:0">Nenhuma conversa aberta no momento.</p></div>';
+  const pauItens = pausadas.filter(casa).sort((a, b) => Date.parse(a.pausado_em) - Date.parse(b.pausado_em));
+  const blocoPau = (!cvFiltro || cvFiltro === "pausado") && pauItens.length ? bloco("Pausadas", pauItens, c => linhaConversa(c, c.situacao || "em_dia", false, true), cvFiltro === "pausado") : "";
+  const html = cvFiltro === "cobranca" ? blocoCob : cvFiltro === "pausado" ? blocoPau : blocoCob + grupos + blocoPau;
+  $("#cvGrupos").innerHTML = html || `<div class="card"><p class="lead" style="margin:0">${q ? "Nenhuma conversa encontrada para essa busca." : "Nenhuma conversa aberta no momento."}</p></div>`;
   const ult = conversas.map(c => c.atualizada_em).filter(Boolean).sort().at(-1);
-  $("#cvAtual").textContent = ult ? `Atualizado há ${haQuanto(ult)}.` : "";
+  const falta005 = conversas.length && !("pausado_em" in conversas[0]);
+  $("#cvAtual").textContent = (ult ? `Atualizado há ${haQuanto(ult)}.` : "") + (falta005 ? " Para Pausar e Cobrar, rode o supabase/005_conversas_pausa_cobrar.sql." : "");
 }
-function linhaConversa(c, k, modoCob) {
-  const at = c.atendimento_id ? lista.find(a => a.id === c.atendimento_id) : lista.find(a => a.bitrix_sessao === c.sessao && !FINAIS.includes(a.status));
-  const espera = k === "sem_resposta" || k === "responder" || k === "nova" ? `cliente esperando há ${haQuanto(c.cliente_desde || c.ultima_msg_em)}` : k === "promessa" ? `prometido há ${haQuanto(c.ultima_msg_em)}` : k === "chamado" ? `última atualização há ${haQuanto(c.ultima_resposta_em)}` : `última mensagem há ${haQuanto(c.ultima_msg_em)}`;
-  return `<div class="cv"><span class="bar" style="background:${CV[k][1]}"></span>
-    <div><div class="tt"><b>${esc(c.cliente || c.nome || "Cliente")}</b><span class="pill">nº ${c.sessao}</span>${at ? `<span class="pill ok">#${at.id}${at.os_numero ? " · O.S. " + esc(at.os_numero) : ""}</span>` : ""}${isSup() && !cvPessoa ? `<span class="pill">${esc(perfis[c.operador]?.nome || "")}</span>` : ""}<span class="salvo">${espera}</span></div>
+function linhaConversa(c, k, modoCob, pausada) {
+  const at = atDaConversa(c);
+  const espera = pausada ? `pausada há ${haQuanto(c.pausado_em)}`
+    : k === "pedido" ? `prometeu o pedido há ${haQuanto(c.ultima_resposta_em || c.ultima_msg_em)}`
+    : k === "retornar" ? `cliente respondeu há ${haQuanto(c.ultima_msg_em)}`
+    : k === "sem_resposta" || k === "responder" || k === "nova" ? `cliente esperando há ${haQuanto(c.cliente_desde || c.ultima_msg_em)}`
+    : k === "promessa" ? `prometido há ${haQuanto(c.ultima_resposta_em || c.ultima_msg_em)}`
+    : k === "chamado" ? `última atualização há ${haQuanto(c.ultima_resposta_em)}` : `última mensagem há ${haQuanto(c.ultima_msg_em)}`;
+  const urgente = !pausada && (k === "pedido" || (k === "sem_resposta" && c.cliente_desde && Date.now() - Date.parse(c.cliente_desde) > DIA));
+  const cor = pausada ? "var(--muted)" : CV[k][1];
+  const quem = id => id && perfis[id] ? " por " + esc(perfis[id].nome.split(" ")[0]) : "";
+  const cobInfo = !c.cobranca ? "" : cobAuto(c) ? `${fmtDH(c.cobranca_em)} — ${esc(c.cobranca_texto || "")}` : `marcada para cobrar${quem(c.cobranca_manual_por)} em ${fmtDH(c.cobranca_manual_em)}`;
+  const opCobrar = `<option disabled>──────────</option><option value="__cobrar"${c.cobranca ? " disabled" : ""}>${c.cobranca ? "Cobrar (já marcada)" : "Cobrar"}</option>`;
+  const seletor = at
+    ? `<button class="btn sm" type="button" data-cvat="${at.id}">Atendimento</button><select class="btn sm" data-cvsessao="${c.sessao}" data-cvst="${at.id}" aria-label="Situação do atendimento #${at.id}">${Object.entries(STATUS).map(([v, l]) => `<option value="${v}"${at.status === v ? " selected" : ""}${podeEditar(at) || at.status === v ? "" : " disabled"}>${l}</option>`).join("")}${opCobrar}</select>`
+    : `<button class="btn sm" type="button" data-cvreg="${c.sessao}">Registrar</button><select class="btn sm" data-cvsessao="${c.sessao}" aria-label="Situação da conversa nº ${c.sessao}"><option value="">Situação…</option>${opCobrar}</select>`;
+  return `<div class="cv${urgente ? " urgente" : ""}"><span class="bar" style="background:${cor}"></span>
+    <div><div class="tt"><b>${esc(c.cliente || c.nome || "Cliente")}</b><span class="pill">nº ${c.sessao}</span>${at ? `<span class="pill ok">#${at.id}${at.os_numero ? " · O.S. " + esc(at.os_numero) : ""}</span>` : ""}${pausada ? `<span class="pill">Pausada · ${CV[k][0]}</span>` : k === "pedido" || k === "retornar" ? `<span class="pill ${CV[k][2]}">${CV[k][0]}</span>` : ""}${isSup() && !cvPessoa ? `<span class="pill">${esc(perfis[c.operador]?.nome || "")}</span>` : ""}<span class="salvo">${espera}</span></div>
     <div class="txt">${esc(c.ultimo_texto || "(arquivo, áudio ou imagem)")}</div>
-    ${c.cobranca ? `<div class="note crit" style="margin-top:6px;padding:6px 10px;font-size:14px"><b style="display:inline">Cobrança a fazer</b> · ${fmtDH(c.cobranca_em)} — ${esc(c.cobranca_texto || "")}</div>` : ""}</div>
+    ${pausada ? `<div class="pausa">Pausada${quem(c.pausado_por)} em ${fmtDH(c.pausado_em)}${c.pausado_motivo ? " · Justificativa: " + esc(c.pausado_motivo) : ""}</div>` : ""}
+    ${c.cobranca ? `<div class="note crit" style="margin-top:6px;padding:6px 10px;font-size:14px"><b style="display:inline">Cobrança a fazer</b> · ${cobInfo}</div>` : ""}</div>
     <div class="acoes"><a class="btn sm" href="https://nebulize.bitrix24.com.br/online/?IM_DIALOG=chat${c.chat_id}" target="_blank" rel="noopener">Abrir no Bitrix</a>
-    ${at ? `<button class="btn sm" type="button" data-cvat="${at.id}">Atendimento</button><select class="btn sm" data-cvst="${at.id}" aria-label="Status do atendimento #${at.id}"${podeEditar(at) ? "" : " disabled"}>${Object.entries(STATUS).map(([v, l]) => `<option value="${v}"${at.status === v ? " selected" : ""}>${l}</option>`).join("")}</select>` : `<button class="btn sm" type="button" data-cvreg="${c.sessao}">Registrar</button>`}
+    ${seletor}
+    ${pausada ? `<button class="btn sm ico" type="button" data-cvretoma="${c.sessao}" title="Retomar" aria-label="Retomar conversa nº ${c.sessao}">${ICO_RETOMAR}</button>` : `<button class="btn sm ico" type="button" data-cvpausa="${c.sessao}" title="Pausar" aria-label="Pausar conversa nº ${c.sessao}">${ICO_PAUSA}</button>`}
     ${c.cobranca ? `<button class="btn sm" type="button" data-cvcob="${c.sessao}">Cobrança feita</button>` : ""}
-    ${k !== "em_dia" && !modoCob ? `<button class="btn sm pri" type="button" data-cvok="${c.sessao}">✓ Respondido</button>` : ""}</div></div>`;
+    ${k !== "em_dia" && !modoCob && !pausada ? `<button class="btn sm pri" type="button" data-cvok="${c.sessao}">✓ Respondido</button>` : ""}</div></div>`;
+}
+async function atualizarSessao(c, campos, msg) {
+  const { error } = await sb.from("bitrix_sessoes").update(campos).eq("sessao", c.sessao);
+  if (error) { toast(error.message); return false; }
+  Object.assign(c, campos); renderConversas(); if (msg) toast(msg); return true;
+}
+function eventoAt(c, tipo, descricao) {
+  const at = atDaConversa(c);
+  if (at) sb.from("atendimento_eventos").insert({ atendimento_id: at.id, autor: me.id, tipo, descricao }).then(() => {});
 }
 $("#cvGrupos").addEventListener("click", async e => {
   const a = e.target.closest("[data-cvat]"); if (a) return abrirAtendimento(Number(a.dataset.cvat), true);
   const r = e.target.closest("[data-cvreg]");
   if (r) { abrirNovo(); $("#n_bitrix").value = r.dataset.cvreg; $("#n_canal").value = "Bitrix"; return; }
+  const acha = (el, k) => conversas.find(x => x.sessao === Number(el.dataset[k]));
   const ok = e.target.closest("[data-cvok]");
-  if (ok) {
-    const c = conversas.find(x => x.sessao === Number(ok.dataset.cvok)); if (!c) return;
-    const { error } = await sb.from("bitrix_sessoes").update({ resolvido_msg_id: c.ultimo_msg_id, situacao: "em_dia" }).eq("sessao", c.sessao);
-    if (error) { toast(error.message); return; }
-    c.resolvido_msg_id = c.ultimo_msg_id; c.situacao = "em_dia"; renderConversas(); toast("Marcada como respondida até chegar mensagem nova");
-  }
+  if (ok) { const c = acha(ok, "cvok"); if (c) atualizarSessao(c, { resolvido_msg_id: c.ultimo_msg_id, situacao: "em_dia" }, "Marcada como respondida até chegar mensagem nova"); return; }
   const cb = e.target.closest("[data-cvcob]");
   if (cb) {
-    const c = conversas.find(x => x.sessao === Number(cb.dataset.cvcob)); if (!c) return;
-    const { error } = await sb.from("bitrix_sessoes").update({ cobranca: false, cobranca_feita_msg_id: c.cobranca_msg_id, cobranca_feita_em: new Date().toISOString() }).eq("sessao", c.sessao);
-    if (error) { toast(error.message); return; }
-    c.cobranca = false; c.cobranca_feita_msg_id = c.cobranca_msg_id; renderConversas(); toast("Cobrança marcada como feita");
-    const at = lista.find(a => a.bitrix_sessao === c.sessao && !FINAIS.includes(a.status));
-    if (at) sb.from("atendimento_eventos").insert({ atendimento_id: at.id, autor: me.id, tipo: "cobranca", descricao: "Cobrança feita: " + (c.cobranca_texto || "").slice(0, 150) }).then(() => {});
+    const c = acha(cb, "cvcob"); if (!c) return;
+    const texto = cobAuto(c) ? c.cobranca_texto : "marcada no portal";
+    if (await atualizarSessao(c, { cobranca: false, cobranca_manual: false, cobranca_feita_msg_id: c.cobranca_msg_id, cobranca_feita_em: new Date().toISOString() }, "Cobrança marcada como feita"))
+      eventoAt(c, "cobranca", "Cobrança feita: " + (texto || "").slice(0, 150));
+    return;
+  }
+  const pa = e.target.closest("[data-cvpausa]");
+  if (pa) {
+    const c = acha(pa, "cvpausa"); if (!c) return;
+    cvPausaSessao = c.sessao; $("#pausaNome").textContent = `${c.cliente || c.nome || "Cliente"} · conversa nº ${c.sessao}`;
+    $("#pausaMotivo").value = ""; $("#mPausa").classList.add("on"); $("#pausaMotivo").focus(); return;
+  }
+  const rt = e.target.closest("[data-cvretoma]");
+  if (rt) { const c = acha(rt, "cvretoma"); if (c) atualizarSessao(c, { pausado_em: null, pausado_motivo: null, pausado_msg_id: null, pausado_por: null }, "Conversa retomada"); }
+});
+$("#pausaCancel").onclick = () => $("#mPausa").classList.remove("on");
+$("#fPausa").addEventListener("submit", async e => {
+  e.preventDefault();
+  const c = conversas.find(x => x.sessao === cvPausaSessao); if (!c) return;
+  const motivo = $("#pausaMotivo").value.trim();
+  if (await atualizarSessao(c, { pausado_em: new Date().toISOString(), pausado_motivo: motivo || null, pausado_msg_id: c.ultimo_msg_id || 0, pausado_por: me.id }, "Conversa pausada até chegar mensagem nova")) {
+    $("#mPausa").classList.remove("on");
+    eventoAt(c, "pausa", "Conversa pausada" + (motivo ? ": " + motivo.slice(0, 150) : ""));
   }
 });
 $("#cvGrupos").addEventListener("change", async e => {
-  const sel = e.target.closest("[data-cvst]"); if (!sel) return;
-  const id = Number(sel.dataset.cvst), st = sel.value;
+  const sel = e.target.closest("select[data-cvsessao]"); if (!sel) return;
+  const c = conversas.find(x => x.sessao === Number(sel.dataset.cvsessao));
+  const id = Number(sel.dataset.cvst) || null, st = sel.value;
+  if (st === "__cobrar") {
+    sel.value = id ? (lista.find(x => x.id === id)?.status || "") : "";
+    if (!c) return;
+    if (await atualizarSessao(c, { cobranca: true, cobranca_manual: true, cobranca_manual_em: new Date().toISOString(), cobranca_manual_por: me.id }, "Marcada para cobrar — está em Cobranças a fazer"))
+      eventoAt(c, "cobranca", "Marcada para cobrar no portal");
+    return;
+  }
+  if (!id || !st) return;
   const { data, error } = await sb.from("atendimentos").update({ status: st }).eq("id", id).select().single();
   if (error) { toast(error.message); return; }
   const i = lista.findIndex(x => x.id === id); if (i >= 0) lista[i] = data; if (A?.id === id) A = { ...data };

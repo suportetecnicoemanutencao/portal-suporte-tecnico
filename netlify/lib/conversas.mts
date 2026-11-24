@@ -8,6 +8,9 @@ import { mensagensDoHistorico, type Msg } from "./bitrix-conversa.mts"
  *  - Sem resposta: cliente esperando há mais de 4 h.
  *  - Promessa pendente: última mensagem da auxiliar é "só um momento", "vou verificar", "te retorno"… há mais de 1 h.
  *  - Nova: conversa atribuída sem nenhuma resposta da auxiliar ainda.
+ *  - Pedido prometido (Monitor da Katielen): "vou gerar o pedido"… sem continuação há 30 min — urgente, repete a cada 1 h.
+ *  - Retornar: cliente só respondeu "ok/obrigado" depois da resposta (se antes houve promessa/pedido, continua promessa/pedido).
+ *  - Pausada: a auxiliar pausou com justificativa; sem avisos até chegar mensagem nova.
  *  - Chamado a atualizar: atendimento com O.S. em aberto e mais de 24 h sem falar com o cliente.
  * Avisos (portal + notificação no Bitrix) de segunda a sexta, 07:00–17:45; o mesmo aviso repete a cada 3 h.
  * Resumo diário às 8h.
@@ -15,12 +18,15 @@ import { mensagensDoHistorico, type Msg } from "./bitrix-conversa.mts"
 const H = 3600e3
 export const PROMESSA = /(s[óo]\s+um\s+(momento|minuto|minutinho|instante)|um\s+momento|um\s+minutinho|aguarde|vou\s+(verificar|ver|checar|confirmar|consultar|conferir|olhar|analisar)|j[áa]\s+(verifico|vejo|confiro|te\s+(retorno|respondo|falo|passo))|te\s+retorno|retorno\s+(em|j[áa]|logo)|deixa\s+eu\s+(ver|verificar)|estou\s+verificando|vou\s+te\s+retornar)/i
 const CORTESIA = /^\s*(ok+|okay|okk|obrigad[oa]s?|muito obrigad[oa]|grat[oa]|valeu|vlw|at[ée]\s*(breve|mais|logo)|blz|beleza|certo|perfeito|show|t[áa]\s*bom|combinado|de nada|disponha|bom dia|boa tarde|boa noite|tudo bem|👍+|🙏+|ótimo|otimo)[\s!.,]*$/i
+/** Promessa de gerar pedido (urgente) — frases do Monitor Bitrix da Katielen */
+export const PEDIDO = /(gerar|gero|gerando|fazer|fa[çc]o|abrir|lan[çc]ar|emitir|solicitar)\s+(o\s+|um\s+)?pedido|vou\s+pedir/i
 /** Pedido de cobrança citado no chat: "precisa ser cobrado", "cobrar o cliente", "gerar boleto", "faturar"… */
 export const COBRANCA = /(precis[ae]\s+(ser\s+)?cobra|ser\s+cobrad|cobrar\s+(?!o\s+t[ée]cnico|a\s+t[ée]cnica|t[ée]cnico)(o|a|do|da|esse|essa|este|esta|cliente|loja|visita|pe[çc]a|servi[çc]o|valor)|cobran[çc]a|gerar\s+(o\s+)?boleto|emitir\s+(o\s+)?boleto|enviar\s+(o\s+)?boleto|faturar|faturamento|pagamento\s+pendente|em\s+aberto\s+para\s+pagamento|n[ãa]o\s+foi\s+pago|deve\s+ser\s+cobrad)/i
 const FECHOU = /(encerrou|finalizou|fechou)\s+a\s+(sess[ãa]o|conversa)|(sess[ãa]o|conversa)\s+(foi\s+)?(encerrada|finalizada|fechada)/i
 const FINAIS = ["finalizado", "resolvido_chat", "cancelado"]
 
 export const ROTULO: Record<string, string> = {
+  pedido: "Pedido prometido", retornar: "Retornar ao cliente",
   sem_resposta: "Sem resposta há mais de 4 h", promessa: "Promessa pendente", nova: "Nova conversa",
   chamado: "Chamado sem atualização há 24 h", responder: "Cliente aguardando", em_dia: "Em dia",
 }
@@ -44,11 +50,14 @@ export function analisar(msgs: Msg[], agora = Date.now()) {
     const idx = ultOp ? conversa.indexOf(ultOp) + 1 : 0
     clienteDesde = conversa.slice(idx).find(m => m.tipo === "cliente")?.data || ult.data
   }
-  const promessa = ult?.tipo === "operador" && PROMESSA.test(ult.texto) && ult.texto.length < 220
+  // cliente só agradeceu / despediu-se depois da resposta da auxiliar
+  const cortesia = ult?.tipo === "cliente" && !!ultOp && conversa.slice(conversa.indexOf(ultOp) + 1).every(m => CORTESIA.test(m.texto))
+  // promessa/pedido vale na última mensagem da auxiliar, ou na anterior ao "ok" do cliente
+  const ref = ult?.tipo === "operador" ? ult : cortesia ? ultOp : undefined
+  const pedido = !!ref && PEDIDO.test(ref.texto)
+  const promessa = !!ref && !pedido && PROMESSA.test(ref.texto) && ref.texto.length < 220
   // última mensagem (não-bot) que fala em cobrança
   const cob = [...msgs].reverse().find(m => m.tipo !== "bot" && m.texto && COBRANCA.test(m.texto) && !/PowerZap/i.test(m.texto))
-  // cliente só agradeceu / despediu-se depois da resposta da auxiliar: não precisa de retorno
-  const cortesia = ult?.tipo === "cliente" && !!ultOp && conversa.slice(conversa.indexOf(ultOp) + 1).every(m => CORTESIA.test(m.texto))
   return {
     cortesia,
     cobranca_msg_id: cob?.id ?? null,
@@ -63,16 +72,21 @@ export function analisar(msgs: Msg[], agora = Date.now()) {
     operador_respondeu: !!ultOp,
     ultima_resposta_em: ultOp?.data ?? null,
     promessa,
+    pedido,
+    promessa_em: ref && (pedido || promessa) ? ref.data : null,
+    promessa_texto: ref && (pedido || promessa) ? ref.texto.slice(0, 120) : null,
   }
 }
 
 export function situacao(a: ReturnType<typeof analisar>, temChamado: boolean, agora = Date.now()) {
   if (a.encerrada) return null
-  if (a.cortesia) return "em_dia"
+  const desdePromessa = a.promessa_em ? agora - Date.parse(a.promessa_em) : 0
+  if (a.pedido && desdePromessa > 0.5 * H) return "pedido"
+  if (a.cortesia) return a.promessa && desdePromessa > 1 * H ? "promessa" : a.pedido || a.promessa ? "em_dia" : "retornar"
   const desde = a.cliente_desde ? agora - Date.parse(a.cliente_desde) : 0
   if (a.ultima_msg_de === "cliente" && desde > 4 * H) return "sem_resposta"
   if (!a.operador_respondeu) return "nova"
-  if (a.promessa && a.ultima_msg_em && agora - Date.parse(a.ultima_msg_em) > 1 * H) return "promessa"
+  if (a.promessa && desdePromessa > 1 * H) return "promessa"
   if (temChamado && a.ultima_resposta_em && agora - Date.parse(a.ultima_resposta_em) > 24 * H) return "chamado"
   if (a.ultima_msg_de === "cliente") return "responder"
   return "em_dia"
@@ -146,22 +160,27 @@ export async function acompanharConversas(db: SupabaseClient, tempoOk: () => boo
       if (sit && s.resolvido_msg_id && a.ultimo_msg_id && s.resolvido_msg_id >= a.ultimo_msg_id) sit = "em_dia"
       const perfil = porBitrix.get(donos[s.sessao])!
       // cobrança pendente: há pedido de cobrança e ele é mais novo que o último "Cobrança feita"
-      const cobranca = !!a.cobranca_msg_id && !(s.cobranca_feita_msg_id && s.cobranca_feita_msg_id >= a.cobranca_msg_id)
+      const cobrancaAuto = !!a.cobranca_msg_id && !(s.cobranca_feita_msg_id && s.cobranca_feita_msg_id >= a.cobranca_msg_id)
+      const cobranca = cobrancaAuto || !!s.cobranca_manual
+      // pausada pela auxiliar: segue pausada até chegar mensagem mais nova que a do momento da pausa
+      const pausada = !!s.pausado_em && (Number(a.ultimo_msg_id) || 0) <= (Number(s.pausado_msg_id) || 0)
       const alertas = { ...(s.alertas || {}) }
-      // aviso (repete a cada 3 h; "nova" só uma vez)
-      if (podeAvisar && cobranca && alertas.cobranca_msg !== a.cobranca_msg_id) {
+      // aviso (repete a cada 3 h; "pedido" a cada 1 h; "nova" só uma vez) — nada é avisado enquanto pausada
+      if (podeAvisar && !pausada && cobrancaAuto && alertas.cobranca_msg !== a.cobranca_msg_id) {
         const nome = cliente?.name || s.cliente || s.nome || "Cliente"
         await avisar(db, perfil, `Cobrança a fazer · conversa nº ${s.sessao}`, `${nome}: ${(a.cobranca_texto || "").slice(0, 120)}`, `${portalBitrix()}/online/?IM_DIALOG=chat${s.chat_id}`, at?.id ?? null, "conversa_cobranca")
         alertas.cobranca_msg = a.cobranca_msg_id; avisos++
       }
-      if (podeAvisar && sit && ["sem_resposta", "promessa", "chamado", "nova"].includes(sit)) {
+      if (podeAvisar && !pausada && sit && ["pedido", "sem_resposta", "promessa", "chamado", "nova"].includes(sit)) {
         const ultimo = alertas[sit] ? Date.parse(alertas[sit]) : 0
-        const intervalo = sit === "nova" ? Infinity : 3 * H
+        const intervalo = sit === "nova" ? Infinity : sit === "pedido" ? 1 * H : 3 * H
         if (!ultimo || Date.now() - ultimo > intervalo) {
           const nome = cliente?.name || s.cliente || s.nome || "Cliente"
           const espera = a.cliente_desde ? Math.round((Date.now() - Date.parse(a.cliente_desde)) / H) : null
-          const msg = sit === "sem_resposta" ? `${nome} está esperando resposta há ${espera} h.`
-            : sit === "promessa" ? `Você disse "${(a.ultimo_texto || "").replace(/^[^:]+:\s*/, "").slice(0, 60)}" para ${nome} e ainda não retornou.`
+          const fala = (a.promessa_texto || a.ultimo_texto || "").replace(/^[^:]+:\s*/, "").slice(0, 60)
+          const msg = sit === "pedido" ? `URGENTE: você disse "${fala}" para ${nome} e ainda não continuou.`
+            : sit === "sem_resposta" ? `${nome} está esperando resposta há ${espera} h.`
+            : sit === "promessa" ? `Você disse "${fala}" para ${nome} e ainda não retornou.`
             : sit === "chamado" ? `O.S. ${at?.os_numero} de ${nome}: mais de 24 h sem atualizar o cliente.`
             : `${nome} iniciou uma conversa (nº ${s.sessao}).`
           await avisar(db, perfil, `${ROTULO[sit]} · conversa nº ${s.sessao}`, msg, `${portalBitrix()}/online/?IM_DIALOG=chat${s.chat_id}`, at?.id ?? null, "conversa_" + sit)
@@ -175,6 +194,8 @@ export async function acompanharConversas(db: SupabaseClient, tempoOk: () => boo
         ultima_resposta_em: a.ultima_resposta_em, promessa: a.promessa, situacao: sit, alertas, atualizada_em: agoraIso,
         cobranca, cobranca_msg_id: a.cobranca_msg_id, cobranca_texto: a.cobranca_texto, cobranca_em: a.cobranca_em,
         ...(at ? { atendimento_id: at.id } : {}),
+        // chegou mensagem nova: a conversa sai da pausa
+        ...(s.pausado_em && !pausada ? { pausado_em: null, pausado_motivo: null, pausado_msg_id: null, pausado_por: null } : {}),
       }).eq("sessao", s.sessao)
     }
   }
@@ -192,7 +213,7 @@ export async function acompanharConversas(db: SupabaseClient, tempoOk: () => boo
         const c = (k: string) => minhas.filter(x => x.situacao === k).length
         if (!minhas.length) continue
         await avisar(db, p, `Bom dia, ${p.nome.split(" ")[0]}! Resumo das conversas`,
-          `Sem resposta: ${c("sem_resposta")} · Promessas pendentes: ${c("promessa")} · Cobranças: ${minhas.filter(x => x.cobranca).length} · Novas: ${c("nova")} · Chamados a atualizar: ${c("chamado")} · Cliente aguardando: ${c("responder")}`,
+          `Pedidos prometidos: ${c("pedido")} · Sem resposta: ${c("sem_resposta")} · Promessas pendentes: ${c("promessa")} · Cobranças: ${minhas.filter(x => x.cobranca).length} · Novas: ${c("nova")} · Chamados a atualizar: ${c("chamado")} · Retornar: ${c("retornar")} · Cliente aguardando: ${c("responder")}`,
           null, null, "resumo_diario")
         avisos++
       }

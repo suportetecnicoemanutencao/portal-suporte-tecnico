@@ -71,10 +71,19 @@
 <!-- MINHAS CONVERSAS -->
 <section class="view" id="v-conversas">
   <div class="banner">
-    <div style="flex:1;min-width:240px"><h1>Minhas conversas</h1><p class="lead">Conversas do Canal Aberto em que você é a responsável no Bitrix, classificadas a cada 5 minutos. Pedidos de cobrança citados no chat aparecem em "Cobranças a fazer". Avisos no portal e no sino do Bitrix de segunda a sexta, das 7h às 17h45.</p></div>
+    <div style="flex:1;min-width:240px"><h1>Minhas conversas</h1><p class="lead">Conversas do Canal Aberto em que você é a responsável no Bitrix, classificadas a cada 5 minutos. Pedidos de cobrança citados no chat (ou marcados com "Cobrar" na situação) aparecem em "Cobranças a fazer". Pausadas ficam fora dos alertas até chegar mensagem nova. Avisos no portal e no sino do Bitrix de segunda a sexta, das 7h às 17h45.</p></div>
     <select id="cvPessoa" class="sup-only" aria-label="Responsável" style="padding:7px 10px;border:1px solid var(--line);border-radius:8px;background:var(--card)"></select>
   </div>
   <div class="kpis" id="cvKpis"></div>
+  <div class="cv-barra">
+    <input id="cvBusca" type="search" placeholder="Buscar (cliente, nº, O.S., mensagem, justificativa…)" aria-label="Buscar conversa">
+    <div class="cv-exibir"><span>Exibir mensagens</span>
+      <div class="seg" role="group" aria-label="Disposição das mensagens">
+        <button type="button" data-cvlay="horizontal" aria-pressed="false"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><rect x="1.5" y="1.5" width="5" height="5" rx="1"/><rect x="9.5" y="1.5" width="5" height="5" rx="1"/><rect x="1.5" y="9.5" width="5" height="5" rx="1"/><rect x="9.5" y="9.5" width="5" height="5" rx="1"/></svg>Horizontal</button>
+        <button type="button" data-cvlay="vertical" aria-pressed="true"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" aria-hidden="true"><rect x="1.5" y="1.5" width="13" height="3.5" rx="1"/><rect x="1.5" y="6.25" width="13" height="3.5" rx="1"/><rect x="1.5" y="11" width="13" height="3.5" rx="1"/></svg>Vertical</button>
+      </div>
+    </div>
+  </div>
   <div id="cvGrupos" style="display:flex;flex-direction:column;gap:14px"></div>
   <p class="salvo" id="cvAtual"></p>
 </section>
@@ -547,6 +556,16 @@
     <div class="form" style="grid-template-columns:1fr"><label for="s_nova">Nova senha (mín. 8 caracteres)<input id="s_nova" type="password" autocomplete="new-password" minlength="8" required></label></div>
     <div class="err" id="sErr"></div>
     <div style="display:flex;gap:8px;justify-content:flex-end"><button class="btn" type="button" id="sCancel">Cancelar</button><button class="btn pri" type="submit">Salvar senha</button></div>
+  </form>
+</div>
+
+<div class="modal" id="mPausa" role="dialog" aria-modal="true" aria-labelledby="mPausaT">
+  <form class="box" id="fPausa" style="width:min(440px,100%)">
+    <h2 id="mPausaT">Pausar conversa</h2>
+    <p class="lead" id="pausaNome" style="margin:0;font-size:14px"></p>
+    <div class="form" style="grid-template-columns:1fr"><label for="pausaMotivo">Justificativa (opcional)<textarea id="pausaMotivo" rows="3" maxlength="300" placeholder="Ex.: aguardando retorno do financeiro"></textarea></label></div>
+    <p class="salvo" style="margin:0">A conversa sai dos alertas e volta sozinha quando o cliente mandar mensagem nova.</p>
+    <div style="display:flex;gap:8px;justify-content:flex-end"><button class="btn" type="button" id="pausaCancel">Cancelar</button><button class="btn pri" type="submit">Pausar</button></div>
   </form>
 </div>
 

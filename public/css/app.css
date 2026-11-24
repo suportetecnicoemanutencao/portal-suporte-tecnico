@@ -225,3 +225,22 @@ table.lista td.cl{white-space:normal;min-width:180px}
 .cv .txt{color:var(--muted);font-size:14px;margin-top:2px;overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
 .cv .acoes{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}
 @media (max-width:640px){.cv{grid-template-columns:6px 1fr}.cv .acoes{grid-column:2;justify-content:flex-start}}
+/* Minhas conversas · busca, Vertical/Horizontal, pausa, cobrar (005) */
+.cv-barra{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+.cv-barra input{flex:1 1 260px;min-width:0;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--card)}
+.cv-exibir{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:700;color:var(--muted)}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:9px;overflow:hidden;background:var(--card)}
+.seg button{border:0;background:transparent;padding:7px 12px;display:inline-flex;align-items:center;gap:6px;cursor:pointer;font-weight:600;font-size:14px;color:var(--muted)}
+.seg button[aria-pressed="true"]{background:var(--green);color:#fff}
+.cv .acoes select.btn{max-width:190px}
+.cv .acoes .ico{width:32px;justify-content:center;padding:4px 0}
+.cv .pausa{margin-top:6px;font-size:13px;background:var(--soft);border-radius:6px;padding:4px 8px;display:inline-block}
+.cv.urgente .bar{animation:cvPisca 1.4s infinite}
+@keyframes cvPisca{50%{opacity:.25}}
+@media (prefers-reduced-motion:reduce){.cv.urgente .bar{animation:none}}
+#cvGrupos.cv-h details>div{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px;padding-top:12px}
+#cvGrupos.cv-h .cv{display:flex;flex-direction:column;gap:8px;border:1px solid var(--line);border-radius:12px;padding:0 14px 14px;overflow:hidden}
+#cvGrupos.cv-h .cv:last-child{border-bottom:1px solid var(--line)}
+#cvGrupos.cv-h .cv .bar{height:5px;margin:0 -14px 4px;border-radius:0;align-self:auto}
+#cvGrupos.cv-h .cv .acoes{justify-content:flex-start;margin-top:auto}
+#cvGrupos.cv-h .cv .txt{-webkit-line-clamp:3}

@@ -12,6 +12,7 @@ supabase/schema.sql     tabelas, regras de acesso (RLS) e gatilhos
 supabase/002_bitrix_automatico.sql   atualização: abertura automática e captura de dados do Bitrix
 supabase/003_conversas.sql           atualização: aba Minhas conversas + avisos no Bitrix
 supabase/004_cobrancas.sql           atualização: cobranças citadas no chat
+supabase/005_conversas_pausa_cobrar.sql  atualização: pedido/retornar, Pausar, opção Cobrar, Vertical/Horizontal
 scripts/                gerar-config (build) · criar-usuarios
 ```
 
@@ -113,3 +114,16 @@ A cada 5 min o `bitrix-monitor` lê as conversas abertas em que cada uma é a re
 ## Segurança
 - A URL do webhook do Bitrix dá acesso administrativo ao CRM: fica **só** na variável `BITRIX_WEBHOOK_URL` do Netlify. Como ela já foi compartilhada em conversa, recomendo gerar uma nova no Bitrix (Aplicativos → Webhooks) com apenas os escopos `crm`, `imopenlines`, `im`, `user` e atualizar a variável.
 - A chave `service_role` só é usada nas funções do Netlify; o navegador usa a chave anon, limitada pelas regras RLS do banco.
+
+## Minhas conversas · regras do Monitor da Katielen (atualização 005)
+Rode `supabase/005_conversas_pausa_cobrar.sql` (uma vez, depois do 004) e faça novo deploy.
+
+- **Pedido prometido** (novo, urgente): sua última mensagem foi "vou gerar o pedido", "fazer o pedido", "vou pedir"… e passou 30 min sem continuação. A barra pisca e o aviso repete a cada 1 h.
+- **Retornar ao cliente** (novo): o cliente só respondeu "ok/obrigado" depois da sua resposta. Se antes você tinha prometido retorno ou pedido, a conversa continua como Promessa/Pedido.
+- **Pausar** (botão ⏸ em cada conversa): pede uma justificativa opcional, tira a conversa dos alertas e a coloca em *Pausadas*. Volta sozinha quando o cliente manda mensagem nova (ou no botão ▶ Retomar).
+- **Cobrar** no seletor de situação: marca a conversa em *Cobranças a fazer* (sem precisar escrever "cobrança" no chat). *Cobrança feita* baixa a pendência.
+- **Exibir mensagens: Vertical / Horizontal**: lista (um embaixo do outro) ou cards lado a lado. A escolha fica salva no perfil de cada usuário.
+- **Busca** por cliente, nº da conversa, O.S., mensagem ou justificativa.
+- Segurança: o 005 também impede que um auxiliar altere o próprio papel/acesso pelo navegador (só o supervisor).
+
+Depois de conferir que está tudo certo, desative os acionadores do Monitor Bitrix (Apps Script) da Katielen para não receber aviso em dobro.
