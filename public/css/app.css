@@ -244,3 +244,10 @@ table.lista td.cl{white-space:normal;min-width:180px}
 #cvGrupos.cv-h .cv .bar{height:5px;margin:0 -14px 4px;border-radius:0;align-self:auto}
 #cvGrupos.cv-h .cv .acoes{justify-content:flex-start;margin-top:auto}
 #cvGrupos.cv-h .cv .txt{-webkit-line-clamp:3}
+
+/* Máquinas de aluguel (008) */
+.sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
+body:not(.fin):not(.sup) .mq-gestao{display:none}
+body.fin #nav a:not([data-v="maquinas"]),body.fin #nav .grp,body.fin #btnAtual,body.fin #btnBell,body.fin .sup-only{display:none!important}
+.mq-bloq{background:var(--soft)}
+.alerta-maq{margin:0 0 4px}

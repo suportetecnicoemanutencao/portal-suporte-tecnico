@@ -15,6 +15,8 @@ supabase/004_cobrancas.sql           atualização: cobranças citadas no chat
 supabase/005_conversas_pausa_cobrar.sql  atualização: pedido/retornar, Pausar, opção Cobrar, Vertical/Horizontal
 supabase/006_conversas_participantes.sql atualização: conversas iguais à lista do Bitrix de cada usuária
 supabase/007_responsavel_manual.sql   atualização: escolher responsável e adicionar conversa pelo nº
+supabase/008_maquinas_aluguel.sql     atualização: máquinas de aluguel + bloqueio pelo financeiro
+supabase/008b_maquinas_carga.sql      carga inicial da planilha de máquinas (sem valores)
 scripts/                gerar-config (build) · criar-usuarios
 ```
 
@@ -155,3 +157,15 @@ Bloco no topo de **Minhas conversas** com os atendimentos que têm **O.S. aberta
 - Última atualização = última resposta da auxiliar em qualquer sessão da mesma conversa do Bitrix, ou o botão **✓ Atualizei o cliente** (para quando avisou por telefone/WhatsApp).
 - O.S. fechada pelo webhook do Infraspeak (ou atendimento finalizado) sai da lista.
 - O KPI **Chamados a atualizar** mostra também os que estão em dia ao ser clicado.
+
+## Máquinas de aluguel e bloqueio pelo financeiro (atualização 008)
+1. Rode `supabase/008_maquinas_aluguel.sql` e depois `supabase/008b_maquinas_carga.sql` (373 máquinas da planilha; o **valor do aluguel não é importado**).
+2. Crie o usuário do financeiro: Supabase → Authentication → Users → **Add user** (`financeiro@nebulize.com.br`, marque *Auto Confirm User*) e rode:
+   `update public.perfis set papel = 'financeiro', nome = 'Financeiro', ativo = true where email = 'financeiro@nebulize.com.br';`
+   (ou use `npm run usuarios`, que já tem o financeiro na lista).
+3. Faça novo deploy.
+
+- **Financeiro**: entra no mesmo link do portal e vê só **Máquinas de aluguel**. Pesquisa pelo nº de série (ou cliente/código), clica em **Bloquear para atendimento** (com o motivo) ou **Liberar**. Tudo fica no histórico (quem, quando, motivo). O financeiro não vê atendimentos nem conversas.
+- **Auxiliares**: página **Máquinas de aluguel** só para consulta (série, modelo/kit, cliente, loja, cidade, contrato/NF, situação). O menu mostra quantas estão bloqueadas.
+- **Aviso no atendimento**: se o nº de série do atendimento for de uma máquina bloqueada, aparece um alerta vermelho no topo do atendimento, a etiqueta "Máquina bloqueada" na lista de atendimentos e "Máquina bloqueada — segurar atendimento" em Minhas conversas. Chega na hora (tempo real) quando o financeiro bloqueia.
+- **Supervisor**: "Atualizar base de máquinas" na mesma página, enviando a planilha .xlsx atualizada. Os bloqueios continuam valendo (são pelo nº de série).

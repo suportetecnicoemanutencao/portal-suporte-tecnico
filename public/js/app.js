@@ -71,6 +71,15 @@ async function iniciarSessao(session) {
     await sb.auth.signOut({ scope: "local" }); return;
   }
   me = perfil;
+  document.body.classList.toggle("fin", isFin());
+  document.body.classList.toggle("sup", isSup());
+  if (isFin()) {
+    $("#login").classList.add("off");
+    $("#uchip").innerHTML = `<b>${esc(me.nome)}</b><span class="pill">Financeiro</span><button class="btn sm" id="btnSenha" type="button">Senha</button>`;
+    $("#btnSenha").onclick = () => { $("#sErr").textContent = ""; $("#mSenha").classList.add("on"); $("#s_nova").focus(); };
+    sb.channel("maq-bloq").on("postgres_changes", { event: "*", schema: "public", table: "maquinas_bloqueio" }, () => carregarBloqueios().then(renderMaquinas)).subscribe();
+    location.hash = "#maquinas"; route(); return;
+  }
   const { data: ps } = await sb.from("perfis").select("id,nome,papel,ativo");
   perfis = Object.fromEntries((ps || []).map(p => [p.id, p]));
   $("#login").classList.add("off");
@@ -82,6 +91,7 @@ async function iniciarSessao(session) {
   await carregarLista();
   if (ultimo) await abrirAtendimento(ultimo, false);
   await carregarNotifs();
+  await carregarBloqueios();
   carregarConversas();
   assinarRealtime();
   renderAll();
@@ -182,7 +192,7 @@ function renderLista() {
   $("#listaVazia").hidden = rows.length > 0;
   $("#tbLista").innerHTML = rows.map(a => {
     const d = diasParado(a), fim = FINAIS.includes(a.status);
-    return `<tr data-id="${a.id}"><td class="num">#${a.id}</td><td class="cl">${esc(a.cliente || "—")}${a.origem === "bitrix_auto" ? ' <span class="pill info" title="Aberto automaticamente pela saudação no Bitrix">auto</span>' : ""}<br><small class="lead" style="font-size:12px">${esc(a.contato || "")}</small></td>
+    return `<tr data-id="${a.id}"><td class="num">#${a.id}</td><td class="cl">${esc(a.cliente || "—")}${bloqueioDaSerie(a.numero_serie) ? ' <span class="pill crit" title="Máquina bloqueada para atendimento pelo financeiro">Máquina bloqueada</span>' : ""}${a.origem === "bitrix_auto" ? ' <span class="pill info" title="Aberto automaticamente pela saudação no Bitrix">auto</span>' : ""}<br><small class="lead" style="font-size:12px">${esc(a.contato || "")}</small></td>
       <td>${esc(a.tipo || "—")}</td><td>${esc(a.modelo || "—")}</td><td>${stPill(a.status)}</td>
       <td>${esc(perfis[a.criado_por]?.nome || "")}</td><td class="num">${a.bitrix_sessao ? (a.bitrix_link ? `<a href="${esc(a.bitrix_link)}" target="_blank" rel="noopener">${a.bitrix_sessao}</a>` : a.bitrix_sessao) : "—"}</td>
       <td class="num">${esc(a.os_numero || "—")}${a.os_status ? `<br><small class="lead" style="font-size:12px">${esc(a.os_status)}</small>` : ""}</td>
@@ -264,6 +274,7 @@ function renderAtendimento() {
   if (!tem) return;
   const ed = podeEditar(A);
   $("#atTitulo").textContent = `Atendimento #${A.id}`;
+  $("#atAlertaMaq").innerHTML = avisoBloqueio(A);
   $("#atSub").innerHTML = `${A.origem === "bitrix_auto" ? '<span class="pill info">Aberto automaticamente</span> ' : ""}${esc(A.cliente || "Cliente a identificar")} · aberto por ${esc(perfis[A.criado_por]?.nome || "")} em ${fmtDH(A.created_at)} · ${stPill(A.status)}${ed ? "" : ' · <span class="pill warn">somente leitura</span>'}`;
   $("#atStatus").innerHTML = Object.entries(STATUS).map(([k, l]) => `<option value="${k}"${A.status === k ? " selected" : ""}>${l}</option>`).join("");
   $("#atStatus").disabled = !ed;
@@ -519,7 +530,7 @@ function linhaConversa(c, k, modoCob, pausada) {
   const equipe = auxiliaresEquipe();
   const respSel = `<select class="btn sm" data-cvresp="${c.sessao}" aria-label="Responsável pela conversa nº ${c.sessao}" title="Responsável pela conversa">${equipe.map(p => `<option value="${p.id}"${p.id === c.operador ? " selected" : ""}>Resp.: ${esc(p.nome.split(" ")[0])}</option>`).join("")}${c.responsavel_manual ? '<option value="__auto">Voltar ao responsável do Bitrix</option>' : ""}</select>`;
   return `<div class="cv${urgente ? " urgente" : ""}"><span class="bar" style="background:${cor}"></span>
-    <div><div class="tt"><b>${esc(c.cliente || c.nome || "Cliente")}</b><span class="pill">nº ${c.sessao}</span>${at ? `<span class="pill ok">#${at.id}${at.os_numero ? " · O.S. " + esc(at.os_numero) : ""}</span>` : ""}${c.na_fila ? '<span class="pill warn">Na fila — aceite no Bitrix</span>' : ""}${pausada ? `<span class="pill">Pausada · ${CV[k][0]}</span>` : k === "pedido" || k === "retornar" ? `<span class="pill ${CV[k][2]}">${CV[k][0]}</span>` : ""}${isSup() && !cvPessoa ? `<span class="pill">${esc(perfis[c.operador]?.nome || "")}</span>` : ""}<span class="salvo">${espera}</span></div>
+    <div><div class="tt"><b>${esc(c.cliente || c.nome || "Cliente")}</b><span class="pill">nº ${c.sessao}</span>${at ? `<span class="pill ok">#${at.id}${at.os_numero ? " · O.S. " + esc(at.os_numero) : ""}</span>` : ""}${c.na_fila ? '<span class="pill warn">Na fila — aceite no Bitrix</span>' : ""}${at && bloqueioDaSerie(at.numero_serie) ? '<span class="pill crit">Máquina bloqueada — segurar atendimento</span>' : ""}${pausada ? `<span class="pill">Pausada · ${CV[k][0]}</span>` : k === "pedido" || k === "retornar" ? `<span class="pill ${CV[k][2]}">${CV[k][0]}</span>` : ""}${isSup() && !cvPessoa ? `<span class="pill">${esc(perfis[c.operador]?.nome || "")}</span>` : ""}<span class="salvo">${espera}</span></div>
     <div class="txt">${esc(c.ultimo_texto || "(arquivo, áudio ou imagem)")}</div>
     ${pausada ? `<div class="pausa">Pausada${quem(c.pausado_por)} em ${fmtDH(c.pausado_em)}${c.pausado_motivo ? " · Justificativa: " + esc(c.pausado_motivo) : ""}</div>` : ""}
     ${c.cobranca ? `<div class="note crit" style="margin-top:6px;padding:6px 10px;font-size:14px"><b style="display:inline">Cobrança a fazer</b> · ${cobInfo}</div>` : ""}</div>
@@ -633,6 +644,143 @@ $("#fCvAdd").addEventListener("submit", async e => {
 });
 setInterval(() => { if (me && location.hash === "#conversas") carregarConversas(); }, 60000);
 
+/* ================= MÁQUINAS DE ALUGUEL ================= */
+// base da planilha de aluguel (consulta) + bloqueio para atendimento feito pelo financeiro
+let maquinas = [], bloqueios = {}, mqCarregadas = false, mqBloqSerie = null;
+const isFin = () => me?.papel === "financeiro";
+const podeBloquear = () => isFin() || isSup();
+const normSerie = s => String(s || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+/** bloqueio da máquina com esse nº de série (aceita série parcial com 5+ caracteres) */
+function bloqueioDaSerie(serie) {
+  const n = normSerie(serie); if (n.length < 5) return null;
+  return Object.values(bloqueios).find(b => b.bloqueado && (b.serie_norm === n || b.serie_norm.includes(n) || n.includes(b.serie_norm))) || null;
+}
+async function carregarBloqueios() {
+  const { data, error } = await sb.from("maquinas_bloqueio").select("*");
+  if (error) { console.warn("bloqueios (rode o 008):", error.message); return; }
+  bloqueios = Object.fromEntries((data || []).map(b => [b.serie_norm, b]));
+  const n = Object.values(bloqueios).filter(b => b.bloqueado).length;
+  $("#navMaq").hidden = !n; $("#navMaq").textContent = n;
+}
+async function carregarMaquinas(forcar) {
+  if (mqCarregadas && !forcar) return;
+  const todas = [];
+  for (let de = 0; ; de += 1000) {
+    const { data, error } = await sb.from("maquinas_aluguel").select("*").order("serie").range(de, de + 999);
+    if (error) { $("#mqInfo").textContent = "Base indisponível: rode o supabase/008_maquinas_aluguel.sql e o 008b. (" + error.message + ")"; return; }
+    todas.push(...data); if (data.length < 1000) break;
+  }
+  maquinas = todas; mqCarregadas = true;
+}
+async function abrirMaquinas() {
+  $("#mqLead").innerHTML = isFin()
+    ? "Pesquise a máquina pelo <b>nº de série</b> (ou cliente/código) e clique em <b>Bloquear para atendimento</b> quando houver pendência. As auxiliares do suporte veem o bloqueio antes de seguir com o atendimento. Para liberar, clique em <b>Liberar</b>."
+    : "Consulte a máquina pelo nº de série, cliente, código, loja ou cidade antes de seguir com o atendimento. Máquina <b>bloqueada pelo financeiro</b>: segure o atendimento e oriente o cliente a falar com o financeiro.";
+  await Promise.all([carregarMaquinas(), carregarBloqueios()]);
+  renderMaquinas();
+  if (podeBloquear()) renderHistMaq();
+}
+const maqPorSerie = n => maquinas.find(m => m.serie_norm === n);
+function linhaMaq(m, b) {
+  const bloq = b && b.bloqueado;
+  const acao = !podeBloquear() ? "" : bloq
+    ? `<button class="btn sm" type="button" data-mqlib="${esc(b.serie_norm)}">Liberar</button>`
+    : `<button class="btn sm" type="button" data-mqbloq="${esc(m.serie_norm || "")}" data-mqserie="${esc(m.serie || "")}" style="border-color:var(--crit);color:var(--crit)">Bloquear para atendimento</button>`;
+  return `<tr class="${bloq ? "mq-bloq" : ""}"><td class="num"><b>${esc(m.serie || "—")}</b></td>
+    <td>${esc((m.modelo || "").replace(/_$/, ""))}<br><small class="lead" style="font-size:12px">${esc(m.descricao || m.kit || "")}</small></td>
+    <td>${esc(m.cod_cliente || "")}<br><small class="lead" style="font-size:12px">${esc(m.nome || "")}</small></td>
+    <td>${esc(m.estabelecimento || "—")}</td><td>${esc([m.cidade, m.uf].filter(Boolean).join(" / ") || "—")}</td>
+    <td class="num">${esc(m.contrato || "—")}${m.nf ? `<br><small class="lead" style="font-size:12px">NF ${esc(m.nf)}</small>` : ""}</td>
+    <td>${bloq ? `<span class="pill crit">Bloqueada para atendimento</span><br><small style="font-size:12px">${esc(b.motivo || "Pendência financeira")} · ${esc(b.atualizado_por_nome || "")} ${fmtDH(b.atualizado_em)}</small>` : '<span class="pill ok">Liberada</span>'}${m.observacoes ? `<br><small class="lead" style="font-size:12px">${esc(m.observacoes)}</small>` : ""}</td>
+    <td class="mq-gestao">${acao}</td></tr>`;
+}
+function renderMaquinas() {
+  const ativos = Object.values(bloqueios).filter(b => b.bloqueado).sort((a, b) => Date.parse(b.atualizado_em) - Date.parse(a.atualizado_em));
+  $("#mqBloqueadas").innerHTML = ativos.length
+    ? `<div class="card" style="border-left:5px solid var(--crit)"><h2>Máquinas bloqueadas para atendimento · ${ativos.length}</h2><div class="tw"><table class="lista"><thead><tr><th>Nº de série</th><th>Modelo / kit</th><th>Cliente</th><th>Loja</th><th>Cidade</th><th>Contrato · NF</th><th>Situação</th><th class="mq-gestao">Financeiro</th></tr></thead><tbody>${ativos.map(b => linhaMaq(maqPorSerie(b.serie_norm) || { serie: b.serie, serie_norm: b.serie_norm }, b)).join("")}</tbody></table></div></div>`
+    : `<div class="note ok" style="margin:0">Nenhuma máquina bloqueada para atendimento no momento.</div>`;
+  const q = semAcento($("#mqBusca").value.trim()), qs = normSerie($("#mqBusca").value);
+  if (q.length < 2) {
+    $("#mqRes").innerHTML = ""; $("#mqVazio").textContent = `Digite ao menos 2 caracteres para buscar entre ${maquinas.length} máquinas de aluguel.`;
+    $("#mqInfo").textContent = ""; return;
+  }
+  const achou = maquinas.filter(m => (qs.length >= 3 && (m.serie_norm || "").includes(qs)) || semAcento([m.cod_cliente, m.nome, m.estabelecimento, m.cidade, m.uf, m.contrato, m.nf, m.modelo, m.endereco].join(" ")).includes(q));
+  $("#mqRes").innerHTML = achou.slice(0, 80).map(m => linhaMaq(m, bloqueios[m.serie_norm])).join("");
+  $("#mqVazio").textContent = achou.length ? "" : "Nenhuma máquina encontrada. Confira o nº de série (ex.: NB14057S, NBV43028).";
+  $("#mqInfo").textContent = achou.length > 80 ? `${achou.length} encontradas — mostrando 80, refine a busca` : `${achou.length} encontrada${achou.length === 1 ? "" : "s"}`;
+}
+async function renderHistMaq() {
+  const { data } = await sb.from("maquinas_bloqueio_hist").select("*").order("created_at", { ascending: false }).limit(20);
+  $("#mqHist").innerHTML = (data || []).length
+    ? (data || []).map(h => `<div style="padding:6px 0;border-bottom:1px solid var(--line)"><span class="pill ${h.acao === "bloqueou" ? "crit" : "ok"}">${h.acao === "bloqueou" ? "Bloqueou" : "Liberou"}</span> <b>${esc(h.serie || h.serie_norm)}</b> · ${esc(h.autor_nome || "")} · ${fmtDH(h.created_at)}${h.acao === "bloqueou" && h.motivo ? " · " + esc(h.motivo) : ""}</div>`).join("")
+    : "Nenhum bloqueio registrado ainda.";
+}
+let mqT; $("#mqBusca").addEventListener("input", () => { clearTimeout(mqT); mqT = setTimeout(renderMaquinas, 150); });
+$("#v-maquinas").addEventListener("click", async e => {
+  const bq = e.target.closest("[data-mqbloq]");
+  if (bq) {
+    if (!bq.dataset.mqbloq) return toast("Máquina sem nº de série na planilha");
+    mqBloqSerie = { norm: bq.dataset.mqbloq, serie: bq.dataset.mqserie };
+    const m = maqPorSerie(mqBloqSerie.norm);
+    $("#bloqInfo").textContent = `${mqBloqSerie.serie} · ${m ? [m.cod_cliente, m.nome, m.estabelecimento].filter(Boolean).join(" · ") : ""}`;
+    $("#bloqMotivo").value = ""; $("#mBloq").classList.add("on"); $("#bloqMotivo").focus(); return;
+  }
+  const lb = e.target.closest("[data-mqlib]");
+  if (lb) {
+    const b = bloqueios[lb.dataset.mqlib]; if (!b) return;
+    if (!confirm(`Liberar a máquina ${b.serie} para atendimento?`)) return;
+    const { error } = await sb.from("maquinas_bloqueio").update({ bloqueado: false }).eq("serie_norm", b.serie_norm);
+    if (error) return toast(error.message);
+    toast(`${b.serie} liberada para atendimento`); await carregarBloqueios(); renderMaquinas(); renderHistMaq();
+  }
+});
+$("#bloqCancel").onclick = () => $("#mBloq").classList.remove("on");
+$("#fBloq").addEventListener("submit", async e => {
+  e.preventDefault(); if (!mqBloqSerie) return;
+  const motivo = $("#bloqMotivo").value.trim() || "Pendência financeira";
+  const { error } = await sb.from("maquinas_bloqueio").upsert({ serie_norm: mqBloqSerie.norm, serie: mqBloqSerie.serie, bloqueado: true, motivo }, { onConflict: "serie_norm" });
+  if (error) return toast(error.message);
+  $("#mBloq").classList.remove("on"); toast(`${mqBloqSerie.serie} bloqueada para atendimento`);
+  await carregarBloqueios(); renderMaquinas(); renderHistMaq();
+});
+/* supervisor: recarregar a base a partir da planilha .xlsx (o VALOR não é importado) */
+const carregarXlsx = () => window.XLSX ? Promise.resolve() : new Promise((ok, falha) => {
+  const s = document.createElement("script"); s.src = "https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"; s.onload = ok; s.onerror = () => falha(new Error("Não foi possível carregar o leitor de planilhas")); document.head.appendChild(s);
+});
+$("#mqImportar").onclick = async () => {
+  const f = $("#mqArquivo").files[0], info = $("#mqImpInfo");
+  if (!f) return toast("Escolha a planilha .xlsx");
+  try {
+    info.textContent = "Lendo planilha…"; await carregarXlsx();
+    const wb = XLSX.read(await f.arrayBuffer(), { type: "array", cellDates: true });
+    const linhas = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]], { header: 1, raw: true, defval: null });
+    const iCab = linhas.findIndex(l => l.some(c => /n[uú]mero de s[eé]rie/i.test(String(c || ""))));
+    if (iCab < 0) throw new Error('Não achei a coluna "Numero de serie" na planilha');
+    const cab = linhas[iCab].map(c => semAcento(String(c || "").trim()));
+    const col = (...nomes) => cab.findIndex(c => nomes.some(n => c === n || c.startsWith(n)));
+    const C = { ano: col("ano"), modelo: col("modelo"), kit: col("kit"), serie: col("numero de serie"), descricao: col("descricao"), contrato: col("contrato"), cod: col("cod. cliente", "cod cliente"), nome: col("nome"), est: col("estabelecimento"), end: col("endereco"), uf: col("uf"), cidade: col("cidade"), rep: col("representante"), ped: col("nr. pedido", "nr pedido"), nf: col("nf"), nfs: col("nfs"), env: col("data envio"), ent: col("data de entrega"), inst: col("data instalacao"), obs: col("observac") };
+    const txt = (l, i) => { const v = i < 0 ? null : l[i]; if (v === null || v === undefined) return null; const s = String(v).trim(); return s && s !== "'''" ? s : null; };
+    const dt = (l, i) => { const v = i < 0 ? null : l[i]; if (v instanceof Date && !isNaN(v)) return v.toISOString().slice(0, 10); return null; };
+    const rows = linhas.slice(iCab + 1).map(l => ({
+      serie: txt(l, C.serie), serie_norm: normSerie(txt(l, C.serie)) || null, ano: Number(txt(l, C.ano)) || null, modelo: txt(l, C.modelo), kit: txt(l, C.kit),
+      descricao: txt(l, C.descricao), contrato: txt(l, C.contrato), cod_cliente: txt(l, C.cod), nome: txt(l, C.nome), estabelecimento: txt(l, C.est),
+      endereco: txt(l, C.end), uf: txt(l, C.uf), cidade: txt(l, C.cidade), representante: txt(l, C.rep), nr_pedido: txt(l, C.ped), nf: txt(l, C.nf),
+      nfs_ref: txt(l, C.nfs), data_envio: dt(l, C.env), data_entrega: dt(l, C.ent), data_instalacao: dt(l, C.inst), observacoes: txt(l, C.obs),
+    })).filter(r => r.serie || r.nome);
+    if (!rows.length) throw new Error("Nenhuma máquina encontrada na planilha");
+    if (!confirm(`Substituir a base atual (${maquinas.length} máquinas) pelas ${rows.length} da planilha? Os bloqueios continuam valendo.`)) { info.textContent = ""; return; }
+    info.textContent = "Gravando…";
+    const del = await sb.from("maquinas_aluguel").delete().gt("id", 0); if (del.error) throw del.error;
+    for (let i = 0; i < rows.length; i += 500) { const { error } = await sb.from("maquinas_aluguel").insert(rows.slice(i, i + 500)); if (error) throw error; }
+    info.textContent = `${rows.length} máquinas importadas.`; await carregarMaquinas(true); renderMaquinas();
+  } catch (err) { info.textContent = ""; toast(err.message); }
+};
+/** aviso no atendimento / conversa quando a máquina está bloqueada */
+function avisoBloqueio(a) {
+  const b = a && bloqueioDaSerie(a.numero_serie); if (!b) return "";
+  return `<div class="note crit alerta-maq"><b>Máquina ${esc(b.serie)} bloqueada para atendimento pelo financeiro</b>${esc(b.motivo || "Pendência financeira")} · ${esc(b.atualizado_por_nome || "")} em ${fmtDH(b.atualizado_em)}. Segure o atendimento e oriente o cliente a falar com o financeiro (financeiro@nebulize.com.br).</div>`;
+}
+
 /* ================= NOTIFICAÇÕES ================= */
 async function carregarNotifs() {
   const { data } = await sb.from("notificacoes").select("*").eq("usuario_id", me.id).order("id", { ascending: false }).limit(50);
@@ -659,6 +807,10 @@ function assinarRealtime() {
     notifs.unshift(p.new); renderNotifs(); toast(p.new.titulo);
     try { if ("Notification" in window && Notification.permission === "granted") new Notification(p.new.titulo, { body: p.new.mensagem || "", icon: LOGO }); } catch (e) {}
     if (p.new.atendimento_id) carregarLista().then(() => { if (A && A.id === p.new.atendimento_id) abrirAtendimento(A.id, false); else renderLista(); });
+  }).subscribe();
+  sb.channel("maq-bloq").on("postgres_changes", { event: "*", schema: "public", table: "maquinas_bloqueio" }, p => {
+    carregarBloqueios().then(() => { renderAtendimento(); renderLista(); if (location.hash === "#maquinas") renderMaquinas(); if (location.hash === "#conversas") renderConversas(); });
+    if (p.new?.bloqueado && p.eventType !== "DELETE") toast(`Financeiro bloqueou a máquina ${p.new.serie} para atendimento`);
   }).subscribe();
   sb.channel("conversas").on("postgres_changes", { event: "*", schema: "public", table: "bitrix_sessoes" }, () => { clearTimeout(window._cvT); window._cvT = setTimeout(carregarConversas, 1500); }).subscribe();
 }
@@ -932,10 +1084,11 @@ $("#btnCsv").onclick = () => {
 };
 
 /* ================= ROTAS ================= */
-const VIEWS = ["atendimentos", "conversas", "atendimento", "dashboard", "relatorio", "inicio", "recepcao", "identificacao", "testes", "chamado", "fora-garantia", "rma", "acompanhamento", "tecnicos", "emails", "videos", "supervisor"];
+const VIEWS = ["maquinas", "atendimentos", "conversas", "atendimento", "dashboard", "relatorio", "inicio", "recepcao", "identificacao", "testes", "chamado", "fora-garantia", "rma", "acompanhamento", "tecnicos", "emails", "videos", "supervisor"];
 function route() {
   const h = (location.hash || "").slice(1);
   let cur = VIEWS.includes(h) ? h : "atendimentos";
+  if (isFin()) cur = "maquinas";
   if ((cur === "dashboard" || cur === "relatorio") && !isSup()) cur = "atendimentos";
   $$("section.view").forEach(s => s.classList.toggle("on", s.id === "v-" + cur));
   $$("#nav a").forEach(a => a.classList.toggle("on", a.dataset.v === cur));
@@ -944,6 +1097,7 @@ function route() {
   if (cur === "atendimento") carregarEventos();
   if (cur === "atendimentos") renderLista();
   if (cur === "conversas") carregarConversas();
+  if (cur === "maquinas") abrirMaquinas();
   window.scrollTo(0, 0);
 }
 window.addEventListener("hashchange", route);

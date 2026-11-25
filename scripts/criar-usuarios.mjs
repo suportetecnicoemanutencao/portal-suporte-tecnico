@@ -10,6 +10,7 @@ const USUARIOS = [
   { email: "manutencao@nebulize.com.br", nome: "Thalison", papel: "supervisor" },
   { email: "manutencao02@nebulize.com.br", nome: "Katielen", papel: "auxiliar" },
   { email: "manutencao03@nebulize.com.br", nome: "Mayara", papel: "auxiliar" },
+  { email: "financeiro@nebulize.com.br", nome: "Financeiro", papel: "financeiro" },   // só vê Máquinas de aluguel (rode o 008 antes)
 ]
 const { data: lista } = await db.auth.admin.listUsers({ perPage: 1000 })
 for (const u of USUARIOS) {

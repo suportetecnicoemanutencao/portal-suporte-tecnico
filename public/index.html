@@ -29,6 +29,7 @@
   <a href="#atendimentos" data-v="atendimentos"><span class="n">≡</span>Atendimentos</a>
   <a href="#conversas" data-v="conversas"><span class="n">✉</span>Minhas conversas <span class="pill crit" id="navConv" hidden style="margin-left:auto">0</span></a>
   <a href="#atendimento" data-v="atendimento"><span class="n">●</span>Atendimento atual</a>
+  <a href="#maquinas" data-v="maquinas"><span class="n">◎</span>Máquinas de aluguel <span class="pill crit" id="navMaq" hidden style="margin-left:auto">0</span></a>
   <a href="#dashboard" data-v="dashboard" class="sup-only"><span class="n">▤</span>Dashboard</a>
   <a href="#relatorio" data-v="relatorio" class="sup-only"><span class="n">⎙</span>Relatório mensal</a>
   <div class="grp">Guia</div>
@@ -90,6 +91,32 @@
 </section>
 
 <!-- ATENDIMENTO ATUAL -->
+<section class="view" id="v-maquinas">
+  <div class="banner">
+    <div style="flex:1;min-width:240px"><h1>Máquinas de aluguel</h1>
+      <p class="lead" id="mqLead">Consulte a máquina pelo nº de série, cliente, código, loja ou cidade antes de seguir com o atendimento. Máquina <b>bloqueada pelo financeiro</b>: segure o atendimento e oriente o cliente a falar com o financeiro.</p></div>
+  </div>
+  <div id="mqBloqueadas"></div>
+  <div class="card">
+    <label for="mqBusca" class="sr-only">Buscar máquina</label>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+      <input id="mqBusca" type="search" autocomplete="off" placeholder="Nº de série, cliente, código (C00162), loja ou cidade" style="flex:1 1 300px;min-width:0;padding:9px 12px;border:1px solid var(--line);border-radius:8px;background:var(--card);font-size:16px">
+      <span class="salvo" id="mqInfo"></span>
+    </div>
+    <div class="tw" style="margin-top:12px"><table class="lista"><thead><tr><th>Nº de série</th><th>Modelo / kit</th><th>Cliente</th><th>Loja</th><th>Cidade</th><th>Contrato · NF</th><th>Situação</th><th class="mq-gestao">Financeiro</th></tr></thead><tbody id="mqRes"></tbody></table></div>
+    <p class="lead" id="mqVazio" style="margin:10px 0 0"></p>
+  </div>
+  <div class="card mq-gestao">
+    <h2>Últimos bloqueios e liberações</h2>
+    <div id="mqHist" class="lead" style="font-size:14px"></div>
+  </div>
+  <div class="card sup-only">
+    <h2>Atualizar base de máquinas</h2>
+    <p class="lead" style="font-size:14px">Envie a planilha <b>MAQUINAS DE ALUGUEL NEBULIZE</b> (.xlsx) atualizada. Ela substitui a base atual; os bloqueios do financeiro continuam valendo (são pelo nº de série). O valor do aluguel não é importado.</p>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center"><input type="file" id="mqArquivo" accept=".xlsx,.xls"><button class="btn pri" type="button" id="mqImportar">Atualizar base</button><span class="salvo" id="mqImpInfo"></span></div>
+  </div>
+</section>
+
 <section class="view" id="v-atendimento">
   <div id="atSem" class="card" hidden>
     <h2>Nenhum atendimento aberto</h2>
@@ -97,6 +124,7 @@
     <div style="margin-top:10px"><a class="btn" href="#atendimentos">Ver lista</a> <button class="btn pri" type="button" data-novo>+ Registrar atendimento</button></div>
   </div>
   <div id="atCom" style="display:flex;flex-direction:column;gap:18px">
+    <div id="atAlertaMaq"></div>
     <div class="banner">
       <div style="flex:1;min-width:240px"><h1 id="atTitulo">Atendimento</h1><p class="lead" id="atSub"></p></div>
       <span class="salvo" id="salvo"></span>
@@ -580,6 +608,15 @@
     </div>
     <div class="err" id="cvAddErr"></div>
     <div style="display:flex;gap:8px;justify-content:flex-end"><button class="btn" type="button" id="cvAddCancel">Cancelar</button><button class="btn pri" type="submit" id="cvAddOk">Adicionar</button></div>
+  </form>
+</div>
+
+<div class="modal" id="mBloq" role="dialog" aria-modal="true" aria-labelledby="mBloqT">
+  <form class="box" id="fBloq" style="width:min(460px,100%)">
+    <h2 id="mBloqT">Bloquear máquina para atendimento</h2>
+    <p class="lead" id="bloqInfo" style="margin:0;font-size:14px"></p>
+    <div class="form" style="grid-template-columns:1fr"><label for="bloqMotivo">Motivo (aparece para as auxiliares)<textarea id="bloqMotivo" rows="3" maxlength="300" placeholder="Ex.: pendência financeira — aguardando retorno do cliente"></textarea></label></div>
+    <div style="display:flex;gap:8px;justify-content:flex-end"><button class="btn" type="button" id="bloqCancel">Cancelar</button><button class="btn pri" type="submit" style="background:var(--crit);border-color:var(--crit)">Bloquear</button></div>
   </form>
 </div>
 
