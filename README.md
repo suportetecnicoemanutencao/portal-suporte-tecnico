@@ -13,6 +13,8 @@ supabase/002_bitrix_automatico.sql   atualização: abertura automática e captu
 supabase/003_conversas.sql           atualização: aba Minhas conversas + avisos no Bitrix
 supabase/004_cobrancas.sql           atualização: cobranças citadas no chat
 supabase/005_conversas_pausa_cobrar.sql  atualização: pedido/retornar, Pausar, opção Cobrar, Vertical/Horizontal
+supabase/006_conversas_participantes.sql atualização: conversas iguais à lista do Bitrix de cada usuária
+supabase/007_responsavel_manual.sql   atualização: escolher responsável e adicionar conversa pelo nº
 scripts/                gerar-config (build) · criar-usuarios
 ```
 
@@ -127,3 +129,29 @@ Rode `supabase/005_conversas_pausa_cobrar.sql` (uma vez, depois do 004) e faça 
 - Segurança: o 005 também impede que um auxiliar altere o próprio papel/acesso pelo navegador (só o supervisor).
 
 Depois de conferir que está tudo certo, desative os acionadores do Monitor Bitrix (Apps Script) da Katielen para não receber aviso em dobro.
+
+## Conversas iguais à lista do Bitrix de cada usuária (atualização 006)
+O webhook geral (`BITRIX_WEBHOOK_URL`) só sabe quem é o **responsável** de cada conversa. Conversas em que a auxiliar é gerente, foi convidada, que estão na fila ou com o "Atendente virtual" só aparecem lendo a lista **dela** no Bitrix — e o `im.recent.list` só devolve as conversas do dono do webhook.
+
+1. Cada auxiliar cria no Bitrix, logada com o próprio usuário: **Aplicativos → Webhooks → Webhook de entrada**, escopos `im` e `imopenlines` (a Katielen pode reaproveitar o do Monitor dela).
+2. No Netlify crie a variável `BITRIX_WEBHOOKS_USUARIOS` (marque como secreta) com o ID do Bitrix de cada uma:
+```json
+{"8937":"https://nebulize.bitrix24.com.br/rest/8937/xxxxxxxx/","14305":"https://nebulize.bitrix24.com.br/rest/14305/yyyyyyyy/"}
+```
+3. Rode `supabase/006_conversas_participantes.sql` e faça novo deploy.
+
+Quem não tiver webhook na variável continua vendo só as conversas em que é a responsável.
+
+## Responsável da conversa e Adicionar conversa (atualização 007)
+Rode `supabase/007_responsavel_manual.sql` e faça novo deploy.
+
+- **Resp.:** em cada conversa, escolha quem é a responsável. A conversa passa a ficar só com ela (vale até a conversa ser encerrada). "Voltar ao responsável do Bitrix" desfaz.
+- **+ Adicionar conversa:** informe o nº da conversa (ou o link do Bitrix) e a responsável, para uma conversa que não apareceu sozinha. Ela entra em até 1 minuto.
+- A descoberta de conversas novas não trava mais quando há um buraco grande na numeração das sessões do Bitrix.
+
+## Chamados a atualizar (atualização 008 — sem SQL)
+Bloco no topo de **Minhas conversas** com os atendimentos que têm **O.S. aberta no Infraspeak** e o cliente sem atualização há mais de 24 h — mesmo se a conversa do Bitrix já foi encerrada.
+
+- Última atualização = última resposta da auxiliar em qualquer sessão da mesma conversa do Bitrix, ou o botão **✓ Atualizei o cliente** (para quando avisou por telefone/WhatsApp).
+- O.S. fechada pelo webhook do Infraspeak (ou atendimento finalizado) sai da lista.
+- O KPI **Chamados a atualizar** mostra também os que estão em dia ao ser clicado.

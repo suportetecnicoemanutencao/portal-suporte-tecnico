@@ -1,5 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js"
-import { bitrix, portalBitrix } from "./comum.mts"
+import { bitrix, portalBitrix, webhooksUsuarios } from "./comum.mts"
 import { mensagensDoHistorico, type Msg } from "./bitrix-conversa.mts"
 
 /**
@@ -78,7 +78,7 @@ export function analisar(msgs: Msg[], agora = Date.now()) {
   }
 }
 
-export function situacao(a: ReturnType<typeof analisar>, temChamado: boolean, agora = Date.now()) {
+export function situacao(a: ReturnType<typeof analisar>, temChamado: boolean, agora = Date.now(), atualizadoEm: string | null = null) {
   if (a.encerrada) return null
   const desdePromessa = a.promessa_em ? agora - Date.parse(a.promessa_em) : 0
   if (a.pedido && desdePromessa > 0.5 * H) return "pedido"
@@ -87,9 +87,25 @@ export function situacao(a: ReturnType<typeof analisar>, temChamado: boolean, ag
   if (a.ultima_msg_de === "cliente" && desde > 4 * H) return "sem_resposta"
   if (!a.operador_respondeu) return "nova"
   if (a.promessa && desdePromessa > 1 * H) return "promessa"
-  if (temChamado && a.ultima_resposta_em && agora - Date.parse(a.ultima_resposta_em) > 24 * H) return "chamado"
+  // última atualização ao cliente: última resposta no chat ou "✓ Atualizei o cliente" no portal
+  const atualizou = Math.max(a.ultima_resposta_em ? Date.parse(a.ultima_resposta_em) : 0, atualizadoEm ? Date.parse(atualizadoEm) : 0)
+  if (temChamado && atualizou && agora - atualizou > 24 * H) return "chamado"
   if (a.ultima_msg_de === "cliente") return "responder"
   return "em_dia"
+}
+
+/** Lista de conversas do Canal Aberto que a usuária vê no Bitrix (webhook dela), mais recentes primeiro. */
+async function recentesDa(webhook: string, paginas = 5) {
+  let itens: any[] = [], ultima: string | null = null
+  for (let i = 0; i < paginas; i++) {
+    const r = await bitrix("im.recent.list", { ONLY_OPENLINES: "Y", ...(ultima ? { LAST_MESSAGE_DATE: ultima } : {}) }, webhook)
+    const pag = r.result?.items || []
+    itens = itens.concat(pag)
+    const d = pag.at(-1)?.message?.date
+    if (!r.result?.hasMore || !pag.length || !d || d === ultima) break
+    ultima = d
+  }
+  return itens
 }
 
 async function batch(cmd: Record<string, string>) {
@@ -109,13 +125,44 @@ async function avisar(db: SupabaseClient, p: Perfil, titulo: string, mensagem: s
 export async function acompanharConversas(db: SupabaseClient, tempoOk: () => boolean) {
   const { data: perfis } = await db.from("perfis").select("id,nome,bitrix_user_id").eq("ativo", true)
   const porBitrix = new Map((perfis || []).filter(p => p.bitrix_user_id).map(p => [Number(p.bitrix_user_id), p as Perfil]))
+  const porId = new Map((perfis || []).map(p => [p.id, p as Perfil]))
   if (!porBitrix.size) return { conversas: 0, avisos: 0 }
+
+  // 0) conversas que aparecem na lista de cada usuária no Bitrix (webhook dela): responsável, gerente
+  //    da conversa ou ainda na fila — pega também sessões antigas e conversas do "Atendente virtual"
+  const participa = new Map<number, Set<string>>()   // sessão -> perfis que veem a conversa
+  const naFila = new Set<number>()
+  for (const [uid, hook] of Object.entries(webhooksUsuarios())) {
+    const p = porBitrix.get(Number(uid)); if (!p || !tempoOk()) continue
+    try {
+      const novos: Record<string, unknown>[] = []
+      for (const it of await recentesDa(hook)) {
+        const ch = it.chat || {}
+        const sessao = Number(it.lines?.id) || Number(String(ch.entity_data_1 || "").split("|")[5]) || 0
+        const chat = Number(ch.id) || Number(String(it.id || "").replace(/\D/g, ""))
+        if (!sessao || !chat || Number(it.lines?.status) >= 60) continue        // sem sessão ou já encerrada
+        const gerentes = (ch.manager_list || []).map(Number)
+        const fila = Number(it.lines?.status) < 10
+        if (!(fila || Number(ch.owner) === Number(uid) || gerentes.includes(Number(uid)) || !gerentes.length)) continue
+        participa.set(sessao, (participa.get(sessao) || new Set<string>()).add(p.id))
+        if (fila) naFila.add(sessao)
+        novos.push({ sessao, chat_id: chat, nome: ch.name || it.title || null, status: "ignorada" })
+      }
+      if (novos.length) await db.from("bitrix_sessoes").upsert(novos, { onConflict: "sessao", ignoreDuplicates: true })
+    } catch (e) { console.error("lista do Bitrix", uid, (e as Error).message) }
+  }
 
   // conversas ainda abertas (últimos 30 dias), as menos atualizadas primeiro
   const desde = new Date(Date.now() - 30 * 24 * H).toISOString()
   const { data: abertas } = await db.from("bitrix_sessoes").select("*").eq("encerrada", false).gte("descoberta_em", desde)
     .order("atualizada_em", { ascending: true, nullsFirst: true }).limit(90)
-  const lista = (abertas || []).filter(s => s.chat_id)
+  const { data: vistas } = participa.size
+    ? await db.from("bitrix_sessoes").select("*").in("sessao", [...participa.keys()])
+    : { data: [] as any[] }
+  // conversas com responsável escolhida no portal (ou adicionadas pelo nº) entram sempre
+  const { data: manuais } = await db.from("bitrix_sessoes").select("*").eq("encerrada", false).not("responsavel_manual", "is", null).limit(200)
+  const jaTem = new Set<number>()
+  const lista = [...(manuais || []), ...(vistas || []), ...(abertas || [])].filter(s => s.chat_id && !jaTem.has(s.sessao) && jaTem.add(s.sessao))
   if (!lista.length) return { conversas: 0, avisos: 0 }
 
   // 1) quem é o operador agora
@@ -126,19 +173,27 @@ export async function acompanharConversas(db: SupabaseClient, tempoOk: () => boo
     const ok = await batch(cmd)
     for (const [k, d] of Object.entries(ok)) donos[Number(k.slice(1))] = Number(d.owner) || 0
   }
-  const daEquipe = lista.filter(s => porBitrix.has(donos[s.sessao]))
+  const manual = (s: any) => s.responsavel_manual && porId.has(s.responsavel_manual)
+  const daEquipe = lista.filter(s => manual(s) || porBitrix.has(donos[s.sessao]) || participa.has(s.sessao))
   const agoraIso = new Date().toISOString()
   // conversas de fora da equipe: só registra o dono
-  const fora = lista.filter(s => s.sessao in donos && !porBitrix.has(donos[s.sessao]))
+  const fora = lista.filter(s => s.sessao in donos && !porBitrix.has(donos[s.sessao]) && !participa.has(s.sessao) && !manual(s))
   const porDono = new Map<number, number[]>()
   for (const s of fora) { const d = donos[s.sessao] || 0; porDono.set(d, [...(porDono.get(d) || []), s.sessao]) }
   for (const [d, ids] of porDono)
     await db.from("bitrix_sessoes").update({ owner_bitrix_id: d || null, operador: null, situacao: null, atualizada_em: agoraIso }).in("sessao", ids)
 
   // atendimentos com O.S. em aberto
-  const { data: chamados } = await db.from("atendimentos").select("id,bitrix_sessao,os_numero,status")
+  const { data: chamados } = await db.from("atendimentos").select("id,bitrix_sessao,os_numero,status,os_status")
     .in("bitrix_sessao", daEquipe.map(s => s.sessao).length ? daEquipe.map(s => s.sessao) : [0])
   const atPorSessao = new Map((chamados || []).filter(a => !FINAIS.includes(a.status)).map(a => [Number(a.bitrix_sessao), a]))
+  // "✓ Atualizei o cliente" marcado no portal (O.S. em aberto)
+  const idsAt = [...atPorSessao.values()].map(a => a.id)
+  const { data: atualizacoes } = idsAt.length
+    ? await db.from("atendimento_eventos").select("atendimento_id,created_at").eq("tipo", "cliente_atualizado").in("atendimento_id", idsAt).order("created_at", { ascending: false })
+    : { data: [] as any[] }
+  const atualizadoEm = new Map<number, string>()
+  for (const ev of atualizacoes || []) if (!atualizadoEm.has(ev.atendimento_id)) atualizadoEm.set(ev.atendimento_id, ev.created_at)
 
   // 2) mensagens e situação
   let avisos = 0
@@ -156,9 +211,15 @@ export async function acompanharConversas(db: SupabaseClient, tempoOk: () => boo
       const cliente = Object.values(users).find((u: any) => u.connector || u.externalAuthId === "imconnector") as any
       const a = analisar(msgs)
       const at = atPorSessao.get(Number(s.sessao))
-      let sit = situacao(a, !!at?.os_numero)
+      const osAberta = !!at?.os_numero && at.os_status !== "fechada"
+      let sit = situacao(a, osAberta, Date.now(), at ? atualizadoEm.get(at.id) ?? null : null)
       if (sit && s.resolvido_msg_id && a.ultimo_msg_id && s.resolvido_msg_id >= a.ultimo_msg_id) sit = "em_dia"
-      const perfil = porBitrix.get(donos[s.sessao])!
+      // responsável: o dono no Bitrix (se for da equipe) ou quem tem a conversa na lista
+      const vistoPor = [...(participa.get(s.sessao) || [])]
+      // ordem: escolhida no portal > dona no Bitrix > quem tem a conversa na lista
+      const perfil = (manual(s) ? porId.get(s.responsavel_manual) : null) || porBitrix.get(donos[s.sessao]) || porId.get(vistoPor[0])!
+      // escolhida no portal: a conversa fica só com ela
+      const participantes = manual(s) ? [perfil.id] : [...new Set([perfil.id, ...vistoPor])]
       // cobrança pendente: há pedido de cobrança e ele é mais novo que o último "Cobrança feita"
       const cobrancaAuto = !!a.cobranca_msg_id && !(s.cobranca_feita_msg_id && s.cobranca_feita_msg_id >= a.cobranca_msg_id)
       const cobranca = cobrancaAuto || !!s.cobranca_manual
@@ -188,7 +249,7 @@ export async function acompanharConversas(db: SupabaseClient, tempoOk: () => boo
         }
       }
       await db.from("bitrix_sessoes").update({
-        owner_bitrix_id: donos[s.sessao], operador: perfil.id, cliente: cliente?.name || s.cliente,
+        owner_bitrix_id: donos[s.sessao] || null, operador: perfil.id, participantes, na_fila: naFila.has(s.sessao), cliente: cliente?.name || s.cliente,
         encerrada: a.encerrada, ultimo_msg_id: a.ultimo_msg_id, ultima_msg_em: a.ultima_msg_em, ultima_msg_de: a.ultima_msg_de,
         ultimo_texto: a.ultimo_texto, cliente_desde: a.cliente_desde, operador_respondeu: a.operador_respondeu,
         ultima_resposta_em: a.ultima_resposta_em, promessa: a.promessa, situacao: sit, alertas, atualizada_em: agoraIso,

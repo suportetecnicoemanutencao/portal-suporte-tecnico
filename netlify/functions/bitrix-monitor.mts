@@ -33,8 +33,14 @@ export default async () => {
     const a = await bitrix("crm.activity.list", { order: { ID: "DESC" }, filter: { PROVIDER_ID: "IMOPENLINES_SESSION" }, select: ["ASSOCIATED_ENTITY_ID"] })
     ultima = Math.max(0, Number(a.result?.[0]?.ASSOCIATED_ENTITY_ID || 0) - 40)
   }
+  // nº da sessão mais nova do Bitrix: a varredura passa por cima de buracos na numeração
+  let topo = 0
+  try {
+    const t = await bitrix("crm.activity.list", { order: { ID: "DESC" }, filter: { PROVIDER_ID: "IMOPENLINES_SESSION" }, select: ["ASSOCIATED_ENTITY_ID"] })
+    topo = Number(t.result?.[0]?.ASSOCIATED_ENTITY_ID) || 0
+  } catch (e) { console.error("topo", (e as Error).message) }
   let maior = ultima, vazios = 0, prox = ultima + 1
-  while (tempoOk() && vazios < 2) {
+  while (tempoOk() && (vazios < 2 || prox <= topo)) {
     const cmd: Record<string, string> = {}
     for (let s = prox; s < prox + 40; s++) cmd["s" + s] = `imopenlines.dialog.get?SESSION_ID=${s}`
     const { ok } = await batch(cmd)
@@ -46,6 +52,8 @@ export default async () => {
     } else vazios++
     prox += 40
   }
+  // varreu até o topo sem achar nada novo: avança o marcador para não ficar preso no buraco
+  if (topo && prox > topo && topo > maior) maior = topo
   if (maior > ultima) await db.from("config_portal").upsert({ chave: "bitrix_ultima_sessao", valor: maior, atualizado_em: new Date().toISOString() })
 
   // carga inicial (uma vez): conversas dos últimos dias que ainda podem estar abertas, para a aba "Minhas conversas"

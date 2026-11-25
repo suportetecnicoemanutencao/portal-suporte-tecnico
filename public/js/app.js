@@ -381,7 +381,8 @@ $("#btnNota").onclick = async () => {
 };
 
 /* ================= MINHAS CONVERSAS ================= */
-let conversas = [], cvFiltro = "", cvPessoa = null, cvBuscaTxt = "", cvPausaSessao = null;
+let conversas = [], cvFiltro = "", cvPessoa = null, cvBuscaTxt = "", cvPausaSessao = null, cvChamados = [];
+const H_ATUALIZAR_CHAMADO = 24;
 const CV = {
   pedido: ["Pedido prometido", "var(--crit)", "crit"],
   sem_resposta: ["Sem resposta há +4 h", "var(--crit)", "crit"], promessa: ["Promessa pendente", "var(--warn)", "warn"],
@@ -389,13 +390,16 @@ const CV = {
   retornar: ["Retornar ao cliente", "var(--warn)", "warn"],
   responder: ["Cliente aguardando", "var(--leaf)", ""], em_dia: ["Em dia", "var(--line)", "ok"],
 };
-const ORDEM_CV = ["pedido", "sem_resposta", "promessa", "nova", "chamado", "retornar", "responder", "em_dia"];
+// "chamado" tem bloco próprio (Chamados a atualizar), montado a partir dos atendimentos com O.S. aberta
+const ORDEM_CV = ["pedido", "sem_resposta", "promessa", "nova", "retornar", "responder", "em_dia"];
 const ICO_PAUSA = '<svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><line x1="4.5" y1="2.5" x2="4.5" y2="11.5"/><line x1="9.5" y1="2.5" x2="9.5" y2="11.5"/></svg>';
 const ICO_RETOMAR = '<svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor" aria-hidden="true"><path d="M4 2.5v9l7-4.5z"/></svg>';
 /** pausada até chegar mensagem mais nova que a do momento da pausa */
 const estaPausada = c => !!c.pausado_em && (Number(c.ultimo_msg_id) || 0) <= (Number(c.pausado_msg_id) || 0);
 /** pedido de cobrança citado no chat ainda não baixado */
 const cobAuto = c => !!c.cobranca_msg_id && !(c.cobranca_feita_msg_id && c.cobranca_feita_msg_id >= c.cobranca_msg_id);
+/** a conversa é desta pessoa: responsável ou está na lista dela no Bitrix */
+const eDe = (c, id) => c.operador === id || (c.participantes || []).includes(id);
 const atDaConversa = c => c.atendimento_id ? lista.find(a => a.id === c.atendimento_id) : lista.find(a => a.bitrix_sessao === c.sessao && !FINAIS.includes(a.status));
 const semAcento = t => String(t ?? "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
 function haQuanto(d) { if (!d) return ""; const m = Math.max(0, Math.round((Date.now() - Date.parse(d)) / 60000)); return m < 60 ? `${m} min` : m < 1440 ? `${Math.floor(m / 60)} h ${m % 60 ? (m % 60) + " min" : ""}`.trim() : `${Math.floor(m / 1440)} d ${Math.floor((m % 1440) / 60)} h`; }
@@ -421,8 +425,35 @@ async function carregarConversas() {
   if (!me) return;
   const { data, error } = await sb.from("bitrix_sessoes").select("*").eq("encerrada", false).not("operador", "is", null).not("situacao", "is", null).order("ultima_msg_em", { ascending: false }).limit(500);
   if (error) { $("#cvAtual").textContent = "Aba indisponível: rode o supabase/003_conversas.sql. (" + error.message + ")"; return; }
-  conversas = data || []; renderConversas();
+  conversas = data || [];
+  await carregarChamadosCv();
+  renderConversas();
 }
+/** Atendimentos com O.S. aberta no Infraspeak e quando o cliente foi atualizado pela última vez. */
+async function carregarChamadosCv() {
+  const abertos = lista.filter(a => a.os_numero && a.os_status !== "fechada" && !a.os_fechada_em && !FINAIS.includes(a.status));
+  if (!abertos.length) { cvChamados = []; return; }
+  const chats = [...new Set(abertos.map(a => a.bitrix_chat_id).filter(Boolean))];
+  const sessoes = [...new Set(abertos.map(a => a.bitrix_sessao).filter(Boolean))];
+  const [rs, ev] = await Promise.all([
+    chats.length || sessoes.length
+      ? sb.from("bitrix_sessoes").select("sessao,chat_id,cliente,operador,participantes,ultima_resposta_em").or([chats.length ? `chat_id.in.(${chats.join(",")})` : "", sessoes.length ? `sessao.in.(${sessoes.join(",")})` : ""].filter(Boolean).join(","))
+      : { data: [] },
+    sb.from("atendimento_eventos").select("atendimento_id,created_at").eq("tipo", "cliente_atualizado").in("atendimento_id", abertos.map(a => a.id)).order("created_at", { ascending: false }),
+  ]);
+  const ses = rs.data || [], evs = ev.data || [];
+  cvChamados = abertos.map(a => {
+    // todas as sessões do mesmo chat (a conversa pode ter continuado em outra sessão)
+    const daConversa = ses.filter(x => (a.bitrix_chat_id && x.chat_id === a.bitrix_chat_id) || x.sessao === a.bitrix_sessao);
+    const ultChat = daConversa.map(x => x.ultima_resposta_em).filter(Boolean).sort().at(-1) || null;
+    const ultPortal = evs.find(x => x.atendimento_id === a.id)?.created_at || null;
+    const ultima = [ultChat, ultPortal].filter(Boolean).sort().at(-1) || a.os_aberta_em || a.created_at;
+    const atual = daConversa.slice().sort((x, y) => y.sessao - x.sessao)[0];
+    return { at: a, ultima, porPortal: ultPortal && ultima === ultPortal, chat_id: a.bitrix_chat_id || atual?.chat_id || null,
+      sessao: atual?.sessao || a.bitrix_sessao, donos: [a.criado_por, atual?.operador, ...(atual?.participantes || [])].filter(Boolean) };
+  });
+}
+const chamadoAtrasado = ch => Date.now() - Date.parse(ch.ultima) > H_ATUALIZAR_CHAMADO * 36e5;
 function renderConversas() {
   if (!me) return;
   aplicarLayoutCv();
@@ -433,16 +464,20 @@ function renderConversas() {
   } else cvPessoa = me.id;
   const q = semAcento(cvBuscaTxt.trim());
   const casa = c => { if (!q) return true; const at = atDaConversa(c); return semAcento([c.cliente, c.nome, c.sessao, c.ultimo_texto, c.pausado_motivo, c.cobranca_texto, at?.id, at?.os_numero].join(" ")).includes(q); };
-  const daPessoa = conversas.filter(c => !cvPessoa || c.operador === cvPessoa);
+  const daPessoa = conversas.filter(c => !cvPessoa || eDe(c, cvPessoa));
   const pausadas = daPessoa.filter(estaPausada);
   const minhas = daPessoa.filter(c => !estaPausada(c));
-  const urg = conversas.filter(c => c.operador === me.id && !estaPausada(c) && (["pedido", "sem_resposta", "promessa", "nova", "chamado"].includes(c.situacao) || c.cobranca)).length;
+  const urg = conversas.filter(c => eDe(c, me.id) && !estaPausada(c) && (["pedido", "sem_resposta", "promessa", "nova", "chamado"].includes(c.situacao) || c.cobranca)).length;
   $("#navConv").hidden = !urg; $("#navConv").textContent = urg;
   const cnt = k => minhas.filter(c => c.situacao === k).length;
   const nCob = minhas.filter(c => c.cobranca).length;
+  const casaCh = ch => !q || semAcento([ch.at.cliente, ch.at.os_numero, ch.at.id, ch.sessao, ch.at.tecnico].join(" ")).includes(q);
+  const chamados = cvChamados.filter(ch => !cvPessoa || ch.donos.includes(cvPessoa));
+  const chAtrasados = chamados.filter(chamadoAtrasado);
   const kpi = (k, rotulo, n, cls) => `<div class="kpi clicavel ${cls}${cvFiltro === k ? " sel" : ""}" data-cv="${k}" role="button" tabindex="0"><span>${rotulo}</span><b class="v">${n}</b></div>`;
   $("#cvKpis").innerHTML = kpi("cobranca", "Cobranças a fazer", nCob, nCob ? "alerta" : "ok")
     + ORDEM_CV.map(k => kpi(k, CV[k][0], cnt(k), CV[k][2] === "crit" && cnt(k) ? "alerta" : CV[k][2] === "warn" && cnt(k) ? "warn" : k === "em_dia" ? "ok" : "info")).join("")
+    + kpi("chamado", "Chamados a atualizar", chAtrasados.length, chAtrasados.length ? "warn" : "ok")
     + kpi("pausado", "Pausadas", pausadas.length, "info");
   $$("#cvKpis [data-cv]").forEach(e => e.onclick = () => { cvFiltro = cvFiltro === e.dataset.cv ? "" : e.dataset.cv; renderConversas(); });
   const bloco = (titulo, itens, html, aberto, borda) => `<details class="card" ${aberto ? "open" : ""}${borda ? ` style="border-left:5px solid ${borda}"` : ""}><summary style="cursor:pointer;font-family:var(--display);font-weight:700;font-size:18px">${titulo} · ${itens.length}</summary><div>${itens.map(html).join("")}</div></details>`;
@@ -454,9 +489,12 @@ function renderConversas() {
     const itens = minhas.filter(c => c.situacao === k && casa(c)).sort((a, b) => Date.parse(a.cliente_desde || a.ultima_msg_em || 0) - Date.parse(b.cliente_desde || b.ultima_msg_em || 0));
     return itens.length ? bloco(CV[k][0], itens, c => linhaConversa(c, k), k !== "em_dia" || cvFiltro === "em_dia") : "";
   }).join("");
+  const chItens = (cvFiltro === "chamado" ? chamados : chAtrasados).filter(casaCh).sort((a, b) => Date.parse(a.ultima) - Date.parse(b.ultima));
+  const blocoCh = (!cvFiltro || cvFiltro === "chamado") && chItens.length
+    ? bloco(cvFiltro === "chamado" ? "Chamados Infraspeak em aberto" : "Chamados a atualizar", chItens, linhaChamado, true, "#7a4fd0") : "";
   const pauItens = pausadas.filter(casa).sort((a, b) => Date.parse(a.pausado_em) - Date.parse(b.pausado_em));
   const blocoPau = (!cvFiltro || cvFiltro === "pausado") && pauItens.length ? bloco("Pausadas", pauItens, c => linhaConversa(c, c.situacao || "em_dia", false, true), cvFiltro === "pausado") : "";
-  const html = cvFiltro === "cobranca" ? blocoCob : cvFiltro === "pausado" ? blocoPau : blocoCob + grupos + blocoPau;
+  const html = cvFiltro === "cobranca" ? blocoCob : cvFiltro === "pausado" ? blocoPau : cvFiltro === "chamado" ? blocoCh : blocoCh + blocoCob + grupos + blocoPau;
   $("#cvGrupos").innerHTML = html || `<div class="card"><p class="lead" style="margin:0">${q ? "Nenhuma conversa encontrada para essa busca." : "Nenhuma conversa aberta no momento."}</p></div>`;
   const ult = conversas.map(c => c.atualizada_em).filter(Boolean).sort().at(-1);
   const falta005 = conversas.length && !("pausado_em" in conversas[0]);
@@ -478,16 +516,26 @@ function linhaConversa(c, k, modoCob, pausada) {
   const seletor = at
     ? `<button class="btn sm" type="button" data-cvat="${at.id}">Atendimento</button><select class="btn sm" data-cvsessao="${c.sessao}" data-cvst="${at.id}" aria-label="Situação do atendimento #${at.id}">${Object.entries(STATUS).map(([v, l]) => `<option value="${v}"${at.status === v ? " selected" : ""}${podeEditar(at) || at.status === v ? "" : " disabled"}>${l}</option>`).join("")}${opCobrar}</select>`
     : `<button class="btn sm" type="button" data-cvreg="${c.sessao}">Registrar</button><select class="btn sm" data-cvsessao="${c.sessao}" aria-label="Situação da conversa nº ${c.sessao}"><option value="">Situação…</option>${opCobrar}</select>`;
+  const equipe = auxiliaresEquipe();
+  const respSel = `<select class="btn sm" data-cvresp="${c.sessao}" aria-label="Responsável pela conversa nº ${c.sessao}" title="Responsável pela conversa">${equipe.map(p => `<option value="${p.id}"${p.id === c.operador ? " selected" : ""}>Resp.: ${esc(p.nome.split(" ")[0])}</option>`).join("")}${c.responsavel_manual ? '<option value="__auto">Voltar ao responsável do Bitrix</option>' : ""}</select>`;
   return `<div class="cv${urgente ? " urgente" : ""}"><span class="bar" style="background:${cor}"></span>
-    <div><div class="tt"><b>${esc(c.cliente || c.nome || "Cliente")}</b><span class="pill">nº ${c.sessao}</span>${at ? `<span class="pill ok">#${at.id}${at.os_numero ? " · O.S. " + esc(at.os_numero) : ""}</span>` : ""}${pausada ? `<span class="pill">Pausada · ${CV[k][0]}</span>` : k === "pedido" || k === "retornar" ? `<span class="pill ${CV[k][2]}">${CV[k][0]}</span>` : ""}${isSup() && !cvPessoa ? `<span class="pill">${esc(perfis[c.operador]?.nome || "")}</span>` : ""}<span class="salvo">${espera}</span></div>
+    <div><div class="tt"><b>${esc(c.cliente || c.nome || "Cliente")}</b><span class="pill">nº ${c.sessao}</span>${at ? `<span class="pill ok">#${at.id}${at.os_numero ? " · O.S. " + esc(at.os_numero) : ""}</span>` : ""}${c.na_fila ? '<span class="pill warn">Na fila — aceite no Bitrix</span>' : ""}${pausada ? `<span class="pill">Pausada · ${CV[k][0]}</span>` : k === "pedido" || k === "retornar" ? `<span class="pill ${CV[k][2]}">${CV[k][0]}</span>` : ""}${isSup() && !cvPessoa ? `<span class="pill">${esc(perfis[c.operador]?.nome || "")}</span>` : ""}<span class="salvo">${espera}</span></div>
     <div class="txt">${esc(c.ultimo_texto || "(arquivo, áudio ou imagem)")}</div>
     ${pausada ? `<div class="pausa">Pausada${quem(c.pausado_por)} em ${fmtDH(c.pausado_em)}${c.pausado_motivo ? " · Justificativa: " + esc(c.pausado_motivo) : ""}</div>` : ""}
     ${c.cobranca ? `<div class="note crit" style="margin-top:6px;padding:6px 10px;font-size:14px"><b style="display:inline">Cobrança a fazer</b> · ${cobInfo}</div>` : ""}</div>
     <div class="acoes"><a class="btn sm" href="https://nebulize.bitrix24.com.br/online/?IM_DIALOG=chat${c.chat_id}" target="_blank" rel="noopener">Abrir no Bitrix</a>
     ${seletor}
+    ${respSel}
     ${pausada ? `<button class="btn sm ico" type="button" data-cvretoma="${c.sessao}" title="Retomar" aria-label="Retomar conversa nº ${c.sessao}">${ICO_RETOMAR}</button>` : `<button class="btn sm ico" type="button" data-cvpausa="${c.sessao}" title="Pausar" aria-label="Pausar conversa nº ${c.sessao}">${ICO_PAUSA}</button>`}
     ${c.cobranca ? `<button class="btn sm" type="button" data-cvcob="${c.sessao}">Cobrança feita</button>` : ""}
     ${k !== "em_dia" && !modoCob && !pausada ? `<button class="btn sm pri" type="button" data-cvok="${c.sessao}">✓ Respondido</button>` : ""}</div></div>`;
+}
+function linhaChamado(ch) {
+  const a = ch.at, atrasado = chamadoAtrasado(ch);
+  return `<div class="cv"><span class="bar" style="background:${atrasado ? "#7a4fd0" : "var(--ok)"}"></span>
+    <div><div class="tt"><b>${esc(a.cliente || "Cliente")}</b><span class="pill ok">#${a.id} · O.S. ${esc(a.os_numero)}</span>${ch.sessao ? `<span class="pill">nº ${ch.sessao}</span>` : ""}${a.tecnico ? `<span class="pill">${esc(a.tecnico)}</span>` : ""}<span class="pill ${atrasado ? "warn" : "ok"}">${atrasado ? "Atualizar o cliente" : "Em dia"}</span>${isSup() && !cvPessoa ? `<span class="pill">${esc(perfis[a.criado_por]?.nome || "")}</span>` : ""}<span class="salvo">${atrasado ? "sem atualizar o cliente há " : "cliente atualizado há "}${haQuanto(ch.ultima)}</span></div>
+    <div class="txt">Última atualização ao cliente: ${fmtDH(ch.ultima)}${ch.porPortal ? " (marcada no portal)" : ""} · ${STATUS[a.status] || a.status}${a.os_aberta_em ? " · O.S. aberta em " + fmtDH(a.os_aberta_em) : ""}</div></div>
+    <div class="acoes">${ch.chat_id ? `<a class="btn sm" href="https://nebulize.bitrix24.com.br/online/?IM_DIALOG=chat${ch.chat_id}" target="_blank" rel="noopener">Abrir no Bitrix</a>` : ""}<button class="btn sm" type="button" data-cvat="${a.id}">Atendimento</button><button class="btn sm pri" type="button" data-chupd="${a.id}">✓ Atualizei o cliente</button></div></div>`;
 }
 async function atualizarSessao(c, campos, msg) {
   const { error } = await sb.from("bitrix_sessoes").update(campos).eq("sessao", c.sessao);
@@ -500,6 +548,14 @@ function eventoAt(c, tipo, descricao) {
 }
 $("#cvGrupos").addEventListener("click", async e => {
   const a = e.target.closest("[data-cvat]"); if (a) return abrirAtendimento(Number(a.dataset.cvat), true);
+  const up = e.target.closest("[data-chupd]");
+  if (up) {
+    const ch = cvChamados.find(x => x.at.id === Number(up.dataset.chupd)); if (!ch) return;
+    const { data, error } = await sb.from("atendimento_eventos").insert({ atendimento_id: ch.at.id, autor: me.id, tipo: "cliente_atualizado", descricao: `Cliente atualizado sobre a O.S. ${ch.at.os_numero}` }).select("created_at").single();
+    if (error) { toast(error.message); return; }
+    ch.ultima = data.created_at; ch.porPortal = true; renderConversas(); toast(`O.S. ${ch.at.os_numero}: atualização registrada`);
+    return;
+  }
   const r = e.target.closest("[data-cvreg]");
   if (r) { abrirNovo(); $("#n_bitrix").value = r.dataset.cvreg; $("#n_canal").value = "Bitrix"; return; }
   const acha = (el, k) => conversas.find(x => x.sessao === Number(el.dataset[k]));
@@ -533,6 +589,17 @@ $("#fPausa").addEventListener("submit", async e => {
   }
 });
 $("#cvGrupos").addEventListener("change", async e => {
+  const rs = e.target.closest("select[data-cvresp]");
+  if (rs) {
+    const c = conversas.find(x => x.sessao === Number(rs.dataset.cvresp)); if (!c) return;
+    const agora = new Date().toISOString();
+    const campos = rs.value === "__auto"
+      ? { responsavel_manual: null, responsavel_manual_em: null, responsavel_manual_por: null, atualizada_em: null }
+      : { responsavel_manual: rs.value, operador: rs.value, participantes: [rs.value], responsavel_manual_em: agora, responsavel_manual_por: me.id };
+    const nome = rs.value === "__auto" ? "o responsável do Bitrix (em até 1 min)" : (perfis[rs.value]?.nome || "");
+    if (await atualizarSessao(c, campos, "Conversa passada para " + nome)) eventoAt(c, "responsavel", "Responsável da conversa: " + nome);
+    return;
+  }
   const sel = e.target.closest("select[data-cvsessao]"); if (!sel) return;
   const c = conversas.find(x => x.sessao === Number(sel.dataset.cvsessao));
   const id = Number(sel.dataset.cvst) || null, st = sel.value;
@@ -550,6 +617,20 @@ $("#cvGrupos").addEventListener("change", async e => {
   toast(`#${id}: ${STATUS[st]}`); renderLista();
 });
 const auxiliaresEquipe = () => Object.values(perfis).filter(p => p.ativo);
+$("#cvAdd").onclick = () => {
+  $("#cvAddResp").innerHTML = auxiliaresEquipe().map(p => `<option value="${p.id}"${p.id === me.id ? " selected" : ""}>${esc(p.nome)}</option>`).join("");
+  $("#cvAddNum").value = ""; $("#cvAddErr").textContent = ""; $("#mCvAdd").classList.add("on"); $("#cvAddNum").focus();
+};
+$("#cvAddCancel").onclick = () => $("#mCvAdd").classList.remove("on");
+$("#fCvAdd").addEventListener("submit", async e => {
+  e.preventDefault();
+  const b = $("#cvAddOk"); b.disabled = true; b.textContent = "Buscando…"; $("#cvAddErr").textContent = "";
+  try {
+    const j = await chamarApi("/api/bitrix/conversa", { numero: $("#cvAddNum").value, responsavel: $("#cvAddResp").value });
+    $("#mCvAdd").classList.remove("on"); toast(`Conversa nº ${j.sessao} adicionada para ${j.responsavel} — aparece em até 1 min`);
+  } catch (err) { $("#cvAddErr").textContent = err.message; }
+  b.disabled = false; b.textContent = "Adicionar";
+});
 setInterval(() => { if (me && location.hash === "#conversas") carregarConversas(); }, 60000);
 
 /* ================= NOTIFICAÇÕES ================= */

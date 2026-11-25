@@ -73,6 +73,7 @@
   <div class="banner">
     <div style="flex:1;min-width:240px"><h1>Minhas conversas</h1><p class="lead">Conversas do Canal Aberto em que você é a responsável no Bitrix, classificadas a cada minuto. Pedidos de cobrança citados no chat (ou marcados com "Cobrar" na situação) aparecem em "Cobranças a fazer". Pausadas ficam fora dos alertas até chegar mensagem nova. Avisos no portal e no sino do Bitrix de segunda a sexta, das 7h às 17h45.</p></div>
     <select id="cvPessoa" class="sup-only" aria-label="Responsável" style="padding:7px 10px;border:1px solid var(--line);border-radius:8px;background:var(--card)"></select>
+    <button class="btn pri" type="button" id="cvAdd">+ Adicionar conversa</button>
   </div>
   <div class="kpis" id="cvKpis"></div>
   <div class="cv-barra">
@@ -566,6 +567,19 @@
     <div class="form" style="grid-template-columns:1fr"><label for="pausaMotivo">Justificativa (opcional)<textarea id="pausaMotivo" rows="3" maxlength="300" placeholder="Ex.: aguardando retorno do financeiro"></textarea></label></div>
     <p class="salvo" style="margin:0">A conversa sai dos alertas e volta sozinha quando o cliente mandar mensagem nova.</p>
     <div style="display:flex;gap:8px;justify-content:flex-end"><button class="btn" type="button" id="pausaCancel">Cancelar</button><button class="btn pri" type="submit">Pausar</button></div>
+  </form>
+</div>
+
+<div class="modal" id="mCvAdd" role="dialog" aria-modal="true" aria-labelledby="mCvAddT">
+  <form class="box" id="fCvAdd" style="width:min(440px,100%)">
+    <h2 id="mCvAddT">Adicionar conversa</h2>
+    <p class="lead" style="margin:0;font-size:14px">Para uma conversa que não apareceu sozinha. Ela entra em Minhas conversas em até 1 minuto.</p>
+    <div class="form" style="grid-template-columns:1fr">
+      <label for="cvAddNum">Nº da conversa ou link do Bitrix<input id="cvAddNum" placeholder="Ex.: 29687 ou …?IM_DIALOG=chat24243" required></label>
+      <label for="cvAddResp">Responsável<select id="cvAddResp"></select></label>
+    </div>
+    <div class="err" id="cvAddErr"></div>
+    <div style="display:flex;gap:8px;justify-content:flex-end"><button class="btn" type="button" id="cvAddCancel">Cancelar</button><button class="btn pri" type="submit" id="cvAddOk">Adicionar</button></div>
   </form>
 </div>
 
