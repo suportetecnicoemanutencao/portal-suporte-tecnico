@@ -646,7 +646,7 @@ setInterval(() => { if (me && location.hash === "#conversas") carregarConversas(
 
 /* ================= MÁQUINAS DE ALUGUEL ================= */
 // base da planilha de aluguel (consulta) + bloqueio para atendimento feito pelo financeiro
-let maquinas = [], bloqueios = {}, mqCarregadas = false, mqBloqSerie = null;
+let maquinas = [], bloqueios = {}, mqCarregadas = 0, mqBloqSerie = null;
 const isFin = () => me?.papel === "financeiro";
 const podeBloquear = () => isFin() || isSup();
 const normSerie = s => String(s || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
@@ -663,14 +663,15 @@ async function carregarBloqueios() {
   $("#navMaq").hidden = !n; $("#navMaq").textContent = n;
 }
 async function carregarMaquinas(forcar) {
-  if (mqCarregadas && !forcar) return;
+  // recarrega se a base veio vazia ou tem mais de 5 min (ex.: a carga foi rodada depois)
+  if (!forcar && maquinas.length && Date.now() - mqCarregadas < 5 * 60000) return;
   const todas = [];
   for (let de = 0; ; de += 1000) {
     const { data, error } = await sb.from("maquinas_aluguel").select("*").order("serie").range(de, de + 999);
     if (error) { $("#mqInfo").textContent = "Base indisponível: rode o supabase/008_maquinas_aluguel.sql e o 008b. (" + error.message + ")"; return; }
     todas.push(...data); if (data.length < 1000) break;
   }
-  maquinas = todas; mqCarregadas = true;
+  maquinas = todas; mqCarregadas = Date.now();
 }
 async function abrirMaquinas() {
   $("#mqLead").innerHTML = isFin()
@@ -700,6 +701,11 @@ function renderMaquinas() {
     ? `<div class="card" style="border-left:5px solid var(--crit)"><h2>Máquinas bloqueadas para atendimento · ${ativos.length}</h2><div class="tw"><table class="lista"><thead><tr><th>Nº de série</th><th>Modelo / kit</th><th>Cliente</th><th>Loja</th><th>Cidade</th><th>Contrato · NF</th><th>Situação</th><th class="mq-gestao">Financeiro</th></tr></thead><tbody>${ativos.map(b => linhaMaq(maqPorSerie(b.serie_norm) || { serie: b.serie, serie_norm: b.serie_norm }, b)).join("")}</tbody></table></div></div>`
     : `<div class="note ok" style="margin:0">Nenhuma máquina bloqueada para atendimento no momento.</div>`;
   const q = semAcento($("#mqBusca").value.trim()), qs = normSerie($("#mqBusca").value);
+  if (!maquinas.length) {
+    $("#mqRes").innerHTML = ""; $("#mqInfo").textContent = "";
+    $("#mqVazio").textContent = isSup() ? "A base de máquinas está vazia: rode o supabase/008b_maquinas_carga.sql no Supabase ou use “Atualizar base de máquinas” abaixo." : "A base de máquinas ainda não foi carregada. Avise o supervisor.";
+    return;
+  }
   if (q.length < 2) {
     $("#mqRes").innerHTML = ""; $("#mqVazio").textContent = `Digite ao menos 2 caracteres para buscar entre ${maquinas.length} máquinas de aluguel.`;
     $("#mqInfo").textContent = ""; return;
@@ -765,7 +771,9 @@ $("#mqImportar").onclick = async () => {
       serie: txt(l, C.serie), serie_norm: normSerie(txt(l, C.serie)) || null, ano: Number(txt(l, C.ano)) || null, modelo: txt(l, C.modelo), kit: txt(l, C.kit),
       descricao: txt(l, C.descricao), contrato: txt(l, C.contrato), cod_cliente: txt(l, C.cod), nome: txt(l, C.nome), estabelecimento: txt(l, C.est),
       endereco: txt(l, C.end), uf: txt(l, C.uf), cidade: txt(l, C.cidade), representante: txt(l, C.rep), nr_pedido: txt(l, C.ped), nf: txt(l, C.nf),
-      nfs_ref: txt(l, C.nfs), data_envio: dt(l, C.env), data_entrega: dt(l, C.ent), data_instalacao: dt(l, C.inst), observacoes: txt(l, C.obs),
+      nfs_ref: txt(l, C.nfs), data_envio: dt(l, C.env), data_entrega: dt(l, C.ent), data_instalacao: dt(l, C.inst),
+      // data preenchida com texto (ex.: "SEM PREVISÃO") vai para as observações
+      observacoes: [txt(l, C.obs), ...[["Data envio", C.env], ["Data de entrega", C.ent], ["Data instalação", C.inst]].filter(([, i]) => !dt(l, i) && txt(l, i)).map(([n, i]) => `${n}: ${txt(l, i)}`)].filter(Boolean).join(" · ") || null,
     })).filter(r => r.serie || r.nome);
     if (!rows.length) throw new Error("Nenhuma máquina encontrada na planilha");
     if (!confirm(`Substituir a base atual (${maquinas.length} máquinas) pelas ${rows.length} da planilha? Os bloqueios continuam valendo.`)) { info.textContent = ""; return; }
