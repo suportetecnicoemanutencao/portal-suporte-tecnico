@@ -17,6 +17,8 @@ supabase/006_conversas_participantes.sql atualização: conversas iguais à list
 supabase/007_responsavel_manual.sql   atualização: escolher responsável e adicionar conversa pelo nº
 supabase/008_maquinas_aluguel.sql     atualização: máquinas de aluguel + bloqueio pelo financeiro
 supabase/008b_maquinas_carga.sql      carga inicial da planilha de máquinas (sem valores)
+supabase/008c_maquinas_permissoes.sql permissões das tabelas de máquinas
+supabase/009_bitrix_por_usuario.sql   atualização: "Conectar meu Bitrix" (webhook de cada usuária)
 scripts/                gerar-config (build) · criar-usuarios
 ```
 
@@ -169,3 +171,10 @@ Bloco no topo de **Minhas conversas** com os atendimentos que têm **O.S. aberta
 - **Auxiliares**: página **Máquinas de aluguel** só para consulta (série, modelo/kit, cliente, loja, cidade, contrato/NF, situação). O menu mostra quantas estão bloqueadas.
 - **Aviso no atendimento**: se o nº de série do atendimento for de uma máquina bloqueada, aparece um alerta vermelho no topo do atendimento, a etiqueta "Máquina bloqueada" na lista de atendimentos e "Máquina bloqueada — segurar atendimento" em Minhas conversas. Chega na hora (tempo real) quando o financeiro bloqueia.
 - **Supervisor**: "Atualizar base de máquinas" na mesma página, enviando a planilha .xlsx atualizada. Os bloqueios continuam valendo (são pelo nº de série).
+
+## Conectar meu Bitrix · som · ler mensagens (atualização 009)
+Rode `supabase/009_bitrix_por_usuario.sql` e faça novo deploy.
+
+- **Conectar meu Bitrix** (Minhas conversas): cada auxiliar cola o webhook de entrada criado com o próprio usuário (escopos `im` e `imopenlines`). O portal confere se o webhook é dela e passa a ler a lista de Canais Abertos dela a cada minuto — igual ao Monitor da Katielen. O webhook fica numa tabela que o navegador não lê. A variável `BITRIX_WEBHOOKS_USUARIOS` deixa de ser necessária.
+- **Som**: bipe + notificação do Windows quando chega mensagem de cliente que precisa de resposta/retorno (com a aba do portal aberta).
+- **Ler mensagens**: mostra as últimas 15 mensagens da conversa dentro do card, sem abrir o Bitrix.

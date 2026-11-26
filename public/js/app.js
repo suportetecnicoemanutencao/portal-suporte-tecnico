@@ -432,11 +432,99 @@ $$("[data-cvlay]").forEach(b => b.onclick = async () => {
 });
 $("#cvBusca").addEventListener("input", e => { cvBuscaTxt = e.target.value; renderConversas(); });
 
+/* ---- Conectar meu Bitrix (webhook da própria usuária) ---- */
+async function statusBitrix() {
+  const { data } = await sb.from("perfis").select("bitrix_user_id,bitrix_conectado_em,bitrix_lista_em,bitrix_lista_erro").eq("id", me.id).single();
+  if (data) Object.assign(me, data);
+  const el = $("#cvConexao"), bt = $("#cvBitrix");
+  if (!me.bitrix_conectado_em) {
+    bt.textContent = "Conectar meu Bitrix"; bt.classList.add("pri");
+    el.innerHTML = `<div class="note warn" style="margin:0">Sua lista do Bitrix ainda não está conectada: aparecem só as conversas em que você é a responsável. Clique em <b>Conectar meu Bitrix</b> para ver todas as conversas do seu Canal Aberto.</div>`;
+  } else {
+    bt.textContent = "Bitrix conectado ✓"; bt.classList.remove("pri");
+    el.innerHTML = me.bitrix_lista_erro
+      ? `<div class="note crit" style="margin:0"><b>Não consegui ler sua lista do Bitrix</b>${esc(me.bitrix_lista_erro)} — confira o webhook em "Bitrix conectado".</div>`
+      : `<p class="salvo" style="margin:0">Lista do Bitrix (usuário ${me.bitrix_user_id}) ${me.bitrix_lista_em ? "lida há " + haQuanto(me.bitrix_lista_em) : "conectada — primeira leitura em até 1 min"}.</p>`;
+  }
+}
+$("#cvBitrix").onclick = () => { $("#bxHook").value = ""; $("#bxErr").textContent = ""; $("#bxRemover").hidden = !me.bitrix_conectado_em; $("#mBitrix").classList.add("on"); $("#bxHook").focus(); };
+$("#bxCancel").onclick = () => $("#mBitrix").classList.remove("on");
+$("#fBitrix").addEventListener("submit", async e => {
+  e.preventDefault();
+  const b = $("#bxOk"); b.disabled = true; b.textContent = "Testando…"; $("#bxErr").textContent = "";
+  try {
+    const j = await chamarApi("/api/bitrix/meu-webhook", { webhook: $("#bxHook").value });
+    $("#mBitrix").classList.remove("on");
+    toast(`Bitrix conectado (${j.nome}) — ${j.conversas} conversas na sua lista; aparecem em até 1 min`);
+    statusBitrix();
+  } catch (err) { $("#bxErr").textContent = err.message; }
+  b.disabled = false; b.textContent = "Conectar";
+});
+$("#bxRemover").onclick = async () => {
+  if (!confirm("Desconectar sua lista do Bitrix do portal?")) return;
+  try { await chamarApi("/api/bitrix/meu-webhook", { remover: true }); $("#mBitrix").classList.remove("on"); toast("Bitrix desconectado"); statusBitrix(); }
+  catch (err) { $("#bxErr").textContent = err.message; }
+};
+
+/* ---- som e notificação de mensagem nova (como o Monitor) ---- */
+const cvVistos = new Map(); let cvPrimeiraCarga = true;
+function somCv() {
+  $("#cvSom").textContent = ui.cvSom ? "Som: ligado" : "Som: desligado";
+  $("#cvSom").setAttribute("aria-pressed", String(!!ui.cvSom));
+}
+$("#cvSom").onclick = async () => {
+  ui.cvSom = !ui.cvSom; saveUi(); somCv();
+  if (ui.cvSom) { bipe(); if ("Notification" in window && Notification.permission === "default") await Notification.requestPermission(); }
+};
+function bipe() {
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    [0, 0.22].forEach(t => { const o = ctx.createOscillator(), g = ctx.createGain(); o.frequency.value = 880; o.connect(g); g.connect(ctx.destination);
+      g.gain.setValueAtTime(0.18, ctx.currentTime + t); g.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + t + 0.18); o.start(ctx.currentTime + t); o.stop(ctx.currentTime + t + 0.2); });
+  } catch {}
+}
+function avisarNovas(lista) {
+  const precisa = ["nova", "sem_resposta", "responder", "retornar", "pedido", "promessa"];
+  const novas = [];
+  for (const c of lista) {
+    const id = Number(c.ultimo_msg_id) || 0, antes = cvVistos.get(c.sessao);
+    if (!cvPrimeiraCarga && id && (antes === undefined || id > antes) && eDe(c, me.id) && !estaPausada(c) && precisa.includes(c.situacao)) novas.push(c);
+    cvVistos.set(c.sessao, id);
+  }
+  cvPrimeiraCarga = false;
+  if (!novas.length) return;
+  const nomes = novas.map(c => c.cliente || c.nome || "Cliente");
+  toast(novas.length === 1 ? `Mensagem de ${nomes[0]} — precisa de resposta` : `${novas.length} conversas precisam de resposta`);
+  if (ui.cvSom) bipe();
+  if (ui.cvSom && "Notification" in window && Notification.permission === "granted" && document.hidden) {
+    const n = new Notification("Portal Suporte Técnico", { body: novas.length === 1 ? `${nomes[0]}: ${(novas[0].ultimo_texto || "").slice(0, 120)}` : nomes.slice(0, 5).join(", "), tag: "cv-novas" });
+    n.onclick = () => { window.focus(); location.hash = "#conversas"; n.close(); };
+  }
+}
+
+/* ---- ler as mensagens sem sair do portal ---- */
+const cvMsgs = {};   // sessao -> { carregando } | { erro } | { mensagens }
+async function abrirMensagens(sessao) {
+  if (cvMsgs[sessao] && !cvMsgs[sessao].erro) { delete cvMsgs[sessao]; return renderConversas(); }
+  cvMsgs[sessao] = { carregando: true }; renderConversas();
+  try { const j = await chamarApi("/api/bitrix/mensagens", { sessao }); cvMsgs[sessao] = { mensagens: j.mensagens }; }
+  catch (err) { cvMsgs[sessao] = { erro: err.message }; }
+  renderConversas();
+}
+function htmlMensagens(sessao) {
+  const m = cvMsgs[sessao]; if (!m) return "";
+  if (m.carregando) return `<div class="cv-msgs"><span class="salvo">Lendo mensagens no Bitrix…</span></div>`;
+  if (m.erro) return `<div class="cv-msgs"><span style="color:var(--crit)">${esc(m.erro)}</span></div>`;
+  return `<div class="cv-msgs">${m.mensagens.map(x => `<div class="cv-msg${x.tipo === "operador" ? " eu" : ""}"><small>${esc(x.tipo === "bot" ? "Atendente virtual" : x.nome || (x.tipo === "cliente" ? "Cliente" : ""))} · ${fmtDH(x.data)}</small>${esc(x.texto || "(arquivo, áudio ou imagem)")}</div>`).join("") || '<span class="salvo">Sem mensagens.</span>'}</div>`;
+}
+
 async function carregarConversas() {
   if (!me) return;
+  statusBitrix(); somCv();
   const { data, error } = await sb.from("bitrix_sessoes").select("*").eq("encerrada", false).not("operador", "is", null).not("situacao", "is", null).order("ultima_msg_em", { ascending: false }).limit(500);
   if (error) { $("#cvAtual").textContent = "Aba indisponível: rode o supabase/003_conversas.sql. (" + error.message + ")"; return; }
   conversas = data || [];
+  avisarNovas(conversas);
   await carregarChamadosCv();
   renderConversas();
 }
@@ -534,12 +622,12 @@ function linhaConversa(c, k, modoCob, pausada) {
     <div class="txt">${esc(c.ultimo_texto || "(arquivo, áudio ou imagem)")}</div>
     ${pausada ? `<div class="pausa">Pausada${quem(c.pausado_por)} em ${fmtDH(c.pausado_em)}${c.pausado_motivo ? " · Justificativa: " + esc(c.pausado_motivo) : ""}</div>` : ""}
     ${c.cobranca ? `<div class="note crit" style="margin-top:6px;padding:6px 10px;font-size:14px"><b style="display:inline">Cobrança a fazer</b> · ${cobInfo}</div>` : ""}</div>
-    <div class="acoes"><a class="btn sm" href="https://nebulize.bitrix24.com.br/online/?IM_DIALOG=chat${c.chat_id}" target="_blank" rel="noopener">Abrir no Bitrix</a>
+    <div class="acoes"><button class="btn sm" type="button" data-cvmsgs="${c.sessao}" aria-expanded="${!!cvMsgs[c.sessao]}">${cvMsgs[c.sessao] ? "Fechar mensagens" : "Ler mensagens"}</button><a class="btn sm" href="https://nebulize.bitrix24.com.br/online/?IM_DIALOG=chat${c.chat_id}" target="_blank" rel="noopener">Abrir no Bitrix</a>
     ${seletor}
     ${respSel}
     ${pausada ? `<button class="btn sm ico" type="button" data-cvretoma="${c.sessao}" title="Retomar" aria-label="Retomar conversa nº ${c.sessao}">${ICO_RETOMAR}</button>` : `<button class="btn sm ico" type="button" data-cvpausa="${c.sessao}" title="Pausar" aria-label="Pausar conversa nº ${c.sessao}">${ICO_PAUSA}</button>`}
     ${c.cobranca ? `<button class="btn sm" type="button" data-cvcob="${c.sessao}">Cobrança feita</button>` : ""}
-    ${k !== "em_dia" && !modoCob && !pausada ? `<button class="btn sm pri" type="button" data-cvok="${c.sessao}">✓ Respondido</button>` : ""}</div></div>`;
+    ${k !== "em_dia" && !modoCob && !pausada ? `<button class="btn sm pri" type="button" data-cvok="${c.sessao}">✓ Respondido</button>` : ""}</div>${htmlMensagens(c.sessao)}</div>`;
 }
 function linhaChamado(ch) {
   const a = ch.at, atrasado = chamadoAtrasado(ch);
@@ -559,6 +647,7 @@ function eventoAt(c, tipo, descricao) {
 }
 $("#cvGrupos").addEventListener("click", async e => {
   const a = e.target.closest("[data-cvat]"); if (a) return abrirAtendimento(Number(a.dataset.cvat), true);
+  const lm = e.target.closest("[data-cvmsgs]"); if (lm) return abrirMensagens(Number(lm.dataset.cvmsgs));
   const up = e.target.closest("[data-chupd]");
   if (up) {
     const ch = cvChamados.find(x => x.at.id === Number(up.dataset.chupd)); if (!ch) return;
@@ -646,7 +735,7 @@ setInterval(() => { if (me && location.hash === "#conversas") carregarConversas(
 
 /* ================= MÁQUINAS DE ALUGUEL ================= */
 // base da planilha de aluguel (consulta) + bloqueio para atendimento feito pelo financeiro
-let maquinas = [], bloqueios = {}, mqCarregadas = 0, mqBloqSerie = null;
+let maquinas = [], bloqueios = {}, mqCarregadas = 0, mqBloqSerie = null, mqErro = "";
 const isFin = () => me?.papel === "financeiro";
 const podeBloquear = () => isFin() || isSup();
 const normSerie = s => String(s || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
@@ -668,10 +757,10 @@ async function carregarMaquinas(forcar) {
   const todas = [];
   for (let de = 0; ; de += 1000) {
     const { data, error } = await sb.from("maquinas_aluguel").select("*").order("serie").range(de, de + 999);
-    if (error) { $("#mqInfo").textContent = "Base indisponível: rode o supabase/008_maquinas_aluguel.sql e o 008b. (" + error.message + ")"; return; }
+    if (error) { mqErro = error.message; console.error("maquinas_aluguel:", error); return; }
     todas.push(...data); if (data.length < 1000) break;
   }
-  maquinas = todas; mqCarregadas = Date.now();
+  maquinas = todas; mqCarregadas = Date.now(); mqErro = "";
 }
 async function abrirMaquinas() {
   $("#mqLead").innerHTML = isFin()
@@ -703,7 +792,9 @@ function renderMaquinas() {
   const q = semAcento($("#mqBusca").value.trim()), qs = normSerie($("#mqBusca").value);
   if (!maquinas.length) {
     $("#mqRes").innerHTML = ""; $("#mqInfo").textContent = "";
-    $("#mqVazio").textContent = isSup() ? "A base de máquinas está vazia: rode o supabase/008b_maquinas_carga.sql no Supabase ou use “Atualizar base de máquinas” abaixo." : "A base de máquinas ainda não foi carregada. Avise o supervisor.";
+    $("#mqVazio").textContent = mqErro
+      ? (/permission|permiss/i.test(mqErro) ? "Sem permissão para ler a base de máquinas: rode o supabase/008c_maquinas_permissoes.sql no Supabase. " : "Erro ao ler a base de máquinas: ") + "(" + mqErro + ")"
+      : isSup() ? "A base de máquinas está vazia: rode o supabase/008b_maquinas_carga.sql no Supabase ou use “Atualizar base de máquinas” abaixo." : "A base de máquinas ainda não foi carregada. Avise o supervisor.";
     return;
   }
   if (q.length < 2) {
@@ -780,8 +871,12 @@ $("#mqImportar").onclick = async () => {
     info.textContent = "Gravando…";
     const del = await sb.from("maquinas_aluguel").delete().gt("id", 0); if (del.error) throw del.error;
     for (let i = 0; i < rows.length; i += 500) { const { error } = await sb.from("maquinas_aluguel").insert(rows.slice(i, i + 500)); if (error) throw error; }
-    info.textContent = `${rows.length} máquinas importadas.`; await carregarMaquinas(true); renderMaquinas();
-  } catch (err) { info.textContent = ""; toast(err.message); }
+    await carregarMaquinas(true); renderMaquinas();
+    info.textContent = mqErro ? `Gravado, mas não consegui ler a base: ${mqErro}` : `${maquinas.length} máquinas na base.`;
+  } catch (err) {
+    // erro fica na tela (não só no aviso que some)
+    info.innerHTML = `<span style="color:var(--crit);font-weight:700">Não foi possível atualizar: ${esc(err.message || String(err))}${/permission|permiss/i.test(err.message || "") ? " — rode o supabase/008c_maquinas_permissoes.sql" : ""}</span>`;
+  }
 };
 /** aviso no atendimento / conversa quando a máquina está bloqueada */
 function avisoBloqueio(a) {

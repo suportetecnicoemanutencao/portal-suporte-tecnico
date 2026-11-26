@@ -132,7 +132,11 @@ export async function acompanharConversas(db: SupabaseClient, tempoOk: () => boo
   //    da conversa ou ainda na fila — pega também sessões antigas e conversas do "Atendente virtual"
   const participa = new Map<number, Set<string>>()   // sessão -> perfis que veem a conversa
   const naFila = new Set<number>()
-  for (const [uid, hook] of Object.entries(webhooksUsuarios())) {
+  // webhooks: os conectados no portal ("Conectar meu Bitrix") + a variável BITRIX_WEBHOOKS_USUARIOS
+  const hooks: Record<number, string> = { ...webhooksUsuarios() }
+  const { data: conectados } = await db.from("bitrix_webhooks").select("bitrix_user_id,webhook")
+  for (const w of conectados || []) hooks[Number(w.bitrix_user_id)] = w.webhook
+  for (const [uid, hook] of Object.entries(hooks)) {
     const p = porBitrix.get(Number(uid)); if (!p || !tempoOk()) continue
     try {
       const novos: Record<string, unknown>[] = []
@@ -149,7 +153,11 @@ export async function acompanharConversas(db: SupabaseClient, tempoOk: () => boo
         novos.push({ sessao, chat_id: chat, nome: ch.name || it.title || null, status: "ignorada" })
       }
       if (novos.length) await db.from("bitrix_sessoes").upsert(novos, { onConflict: "sessao", ignoreDuplicates: true })
-    } catch (e) { console.error("lista do Bitrix", uid, (e as Error).message) }
+      await db.from("perfis").update({ bitrix_lista_em: new Date().toISOString(), bitrix_lista_erro: null }).eq("id", p.id)
+    } catch (e) {
+      console.error("lista do Bitrix", uid, (e as Error).message)
+      await db.from("perfis").update({ bitrix_lista_erro: (e as Error).message.slice(0, 200) }).eq("id", p.id)
+    }
   }
 
   // conversas ainda abertas (últimos 30 dias), as menos atualizadas primeiro
