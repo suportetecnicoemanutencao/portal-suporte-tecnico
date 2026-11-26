@@ -2,6 +2,7 @@ import type { Config } from "@netlify/functions"
 import { admin, bitrix } from "../lib/comum.mts"
 import { lerConversa, montarUpdate, mensagensDoHistorico, extrair, acharSaudacao } from "../lib/bitrix-conversa.mts"
 import { acompanharConversas } from "../lib/conversas.mts"
+import { filaDaEquipe } from "../lib/fila.mts"
 
 /**
  * Roda a cada 1 minuto (o portal recebe as mudanças em tempo real pelo Supabase).
@@ -13,7 +14,9 @@ import { acompanharConversas } from "../lib/conversas.mts"
  */
 const FINAIS = "(finalizado,resolvido_chat,cancelado)"
 const norm = (s: string) => s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().trim()
-const inicio = Date.now()
+// marcado a cada execução (a função fica "quente" entre um minuto e outro; se fosse
+// marcado só ao carregar o módulo, depois de 22 s o monitor parava de ler as conversas)
+let inicio = Date.now()
 const tempoOk = () => Date.now() - inicio < 22000
 
 async function batch(cmd: Record<string, string>) {
@@ -22,9 +25,13 @@ async function batch(cmd: Record<string, string>) {
 }
 
 export default async () => {
+  inicio = Date.now()
   const db = admin()
   const { data: perfis } = await db.from("perfis").select("id,nome,nome_bitrix,ativo").eq("ativo", true)
   const porNome = new Map((perfis || []).map(p => [norm(p.nome_bitrix || p.nome.split(" ")[0]), p]))
+
+  // ---------- 0) fila de cada usuária com o Bitrix conectado (mesmo motor do Monitor da Katielen) ----------
+  try { await filaDaEquipe(db, tempoOk) } catch (e) { console.error("fila", (e as Error).message) }
 
   // ---------- 1) descobrir sessões novas ----------
   const { data: cfg } = await db.from("config_portal").select("valor").eq("chave", "bitrix_ultima_sessao").maybeSingle()

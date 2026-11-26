@@ -19,6 +19,8 @@ supabase/008_maquinas_aluguel.sql     atualização: máquinas de aluguel + bloq
 supabase/008b_maquinas_carga.sql      carga inicial da planilha de máquinas (sem valores)
 supabase/008c_maquinas_permissoes.sql permissões das tabelas de máquinas
 supabase/009_bitrix_por_usuario.sql   atualização: "Conectar meu Bitrix" (webhook de cada usuária)
+supabase/010_fila_como_monitor.sql    atualização: Minhas conversas com o motor do Monitor da Katielen
+supabase/011_fila_resp.sql            atualização: Resp. (passar a conversa para outra pessoa)
 scripts/                gerar-config (build) · criar-usuarios
 ```
 
@@ -178,3 +180,18 @@ Rode `supabase/009_bitrix_por_usuario.sql` e faça novo deploy.
 - **Conectar meu Bitrix** (Minhas conversas): cada auxiliar cola o webhook de entrada criado com o próprio usuário (escopos `im` e `imopenlines`). O portal confere se o webhook é dela e passa a ler a lista de Canais Abertos dela a cada minuto — igual ao Monitor da Katielen. O webhook fica numa tabela que o navegador não lê. A variável `BITRIX_WEBHOOKS_USUARIOS` deixa de ser necessária.
 - **Som**: bipe + notificação do Windows quando chega mensagem de cliente que precisa de resposta/retorno (com a aba do portal aberta).
 - **Ler mensagens**: mostra as últimas 15 mensagens da conversa dentro do card, sem abrir o Bitrix.
+
+## Minhas conversas = Monitor Bitrix da Katielen (atualização 010)
+Rode `supabase/010_fila_como_monitor.sql` e faça novo deploy. Cada auxiliar precisa estar com **Conectar meu Bitrix** feito.
+
+A cada minuto, `netlify/lib/fila.mts` faz exatamente o que o `Codigo.gs` fazia, com o webhook de cada usuária:
+- lê a lista de Canais Abertos dela (`im.recent.list`, até 15 páginas) e só fica com as conversas dela (dona/gerente, sem gerente ou na fila);
+- classifica com as mesmas regras: **pedido prometido** (30 min), **cliente esperando +4 h**, **retornar ao cliente** ("ok/obrigado"), **promessa pendente** (1 h), **mensagens novas** (inclui fila e transferências), **respondidas** (até 24 h, inclusive por colega);
+- procura **cobranças** nas mensagens novas (você escreveu "cobrança/cobrar" ou a conversa fala de valores/boleto/pix);
+- avisa no **sino do Bitrix** com os mesmos intervalos (pedido a cada 1 h, demais a cada 3 h, só dos últimos 2 dias, 7h–17h45 seg–sex) e manda o **resumo do dia** às 8 h.
+
+No portal: **✓ Pronto** some com a conversa até chegar mensagem nova; **Pausar** (com justificativa) tira dos alertas até chegar mensagem nova; **Cobrar** na situação cria a cobrança; **✓ Cobrado** conclui. Chamados do Infraspeak a atualizar continuam vindo dos atendimentos com O.S. aberta.
+
+Depois de conferir, desligue os acionadores do Apps Script do Monitor para não receber aviso em dobro.
+
+- **Resp.** (011): passa a conversa para outra pessoa da equipe; ela sai da sua fila e aparece na dela com a etiqueta "Passada por …" até alguém escolher "Voltar ao responsável do Bitrix". Os avisos do sino do Bitrix continuam só para as conversas que ficaram com você; quem recebeu é avisado pelo portal (som/notificação).

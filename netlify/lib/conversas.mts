@@ -134,8 +134,9 @@ export async function acompanharConversas(db: SupabaseClient, tempoOk: () => boo
   const naFila = new Set<number>()
   // webhooks: os conectados no portal ("Conectar meu Bitrix") + a variável BITRIX_WEBHOOKS_USUARIOS
   const hooks: Record<number, string> = { ...webhooksUsuarios() }
-  const { data: conectados } = await db.from("bitrix_webhooks").select("bitrix_user_id,webhook")
-  for (const w of conectados || []) hooks[Number(w.bitrix_user_id)] = w.webhook
+  // quem conectou o Bitrix no portal é atendida pela fila nova (lib/fila.mts): aqui não lê a lista nem avisa
+  const { data: conectados } = await db.from("bitrix_webhooks").select("perfil_id")
+  const naFilaNova = new Set((conectados || []).map(w => w.perfil_id))
   for (const [uid, hook] of Object.entries(hooks)) {
     const p = porBitrix.get(Number(uid)); if (!p || !tempoOk()) continue
     try {
@@ -171,6 +172,7 @@ export async function acompanharConversas(db: SupabaseClient, tempoOk: () => boo
   const { data: manuais } = await db.from("bitrix_sessoes").select("*").eq("encerrada", false).not("responsavel_manual", "is", null).limit(200)
   const jaTem = new Set<number>()
   const lista = [...(manuais || []), ...(vistas || []), ...(abertas || [])].filter(s => s.chat_id && !jaTem.has(s.sessao) && jaTem.add(s.sessao))
+  console.log(`conversas: listas do Bitrix ${Object.keys(hooks).length}, na lista ${participa.size}, a analisar ${lista.length}`)
   if (!lista.length) return { conversas: 0, avisos: 0 }
 
   // 1) quem é o operador agora
@@ -235,12 +237,12 @@ export async function acompanharConversas(db: SupabaseClient, tempoOk: () => boo
       const pausada = !!s.pausado_em && (Number(a.ultimo_msg_id) || 0) <= (Number(s.pausado_msg_id) || 0)
       const alertas = { ...(s.alertas || {}) }
       // aviso (repete a cada 3 h; "pedido" a cada 1 h; "nova" só uma vez) — nada é avisado enquanto pausada
-      if (podeAvisar && !pausada && cobrancaAuto && alertas.cobranca_msg !== a.cobranca_msg_id) {
+      if (podeAvisar && !naFilaNova.has(perfil.id) && !pausada && cobrancaAuto && alertas.cobranca_msg !== a.cobranca_msg_id) {
         const nome = cliente?.name || s.cliente || s.nome || "Cliente"
         await avisar(db, perfil, `Cobrança a fazer · conversa nº ${s.sessao}`, `${nome}: ${(a.cobranca_texto || "").slice(0, 120)}`, `${portalBitrix()}/online/?IM_DIALOG=chat${s.chat_id}`, at?.id ?? null, "conversa_cobranca")
         alertas.cobranca_msg = a.cobranca_msg_id; avisos++
       }
-      if (podeAvisar && !pausada && sit && ["pedido", "sem_resposta", "promessa", "chamado", "nova"].includes(sit)) {
+      if (podeAvisar && !naFilaNova.has(perfil.id) && !pausada && sit && ["pedido", "sem_resposta", "promessa", "chamado", "nova"].includes(sit)) {
         const ultimo = alertas[sit] ? Date.parse(alertas[sit]) : 0
         const intervalo = sit === "nova" ? Infinity : sit === "pedido" ? 1 * H : 3 * H
         if (!ultimo || Date.now() - ultimo > intervalo) {

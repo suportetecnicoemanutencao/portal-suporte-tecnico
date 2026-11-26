@@ -8,7 +8,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700;800&family=Source+Sans+3:wght@400;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="css/app.css?v=016">
+<link rel="stylesheet" href="css/app.css?v=019">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 </head>
 <body>
@@ -72,11 +72,10 @@
 <!-- MINHAS CONVERSAS -->
 <section class="view" id="v-conversas">
   <div class="banner">
-    <div style="flex:1;min-width:240px"><h1>Minhas conversas</h1><p class="lead">Conversas do Canal Aberto da sua lista do Bitrix (conecte em "Conectar meu Bitrix"), classificadas a cada minuto. Pedidos de cobrança citados no chat (ou marcados com "Cobrar" na situação) aparecem em "Cobranças a fazer". Pausadas ficam fora dos alertas até chegar mensagem nova. Avisos no portal e no sino do Bitrix de segunda a sexta, das 7h às 17h45.</p></div>
+    <div style="flex:1;min-width:240px"><h1>Minhas conversas</h1><p class="lead">A mesma fila do Monitor Bitrix: todas as conversas do seu Canal Aberto, lidas com o seu webhook a cada minuto e separadas em pedido prometido, cliente esperando, retornar, promessa, novas e respondidas. Cobranças e chamados do Infraspeak a atualizar ficam no topo. Avisos no sino do Bitrix de segunda a sexta, das 7h às 17h45, e resumo do dia às 8h.</p></div>
     <select id="cvPessoa" class="sup-only" aria-label="Responsável" style="padding:7px 10px;border:1px solid var(--line);border-radius:8px;background:var(--card)"></select>
     <button class="btn" type="button" id="cvSom" aria-pressed="false">Som: desligado</button>
     <button class="btn" type="button" id="cvBitrix">Conectar meu Bitrix</button>
-    <button class="btn pri" type="button" id="cvAdd">+ Adicionar conversa</button>
   </div>
   <div id="cvConexao"></div>
   <div class="kpis" id="cvKpis"></div>
@@ -602,19 +601,6 @@
   </form>
 </div>
 
-<div class="modal" id="mCvAdd" role="dialog" aria-modal="true" aria-labelledby="mCvAddT">
-  <form class="box" id="fCvAdd" style="width:min(440px,100%)">
-    <h2 id="mCvAddT">Adicionar conversa</h2>
-    <p class="lead" style="margin:0;font-size:14px">Para uma conversa que não apareceu sozinha. Ela entra em Minhas conversas em até 1 minuto.</p>
-    <div class="form" style="grid-template-columns:1fr">
-      <label for="cvAddNum">Nº da conversa ou link do Bitrix<input id="cvAddNum" placeholder="Ex.: 29687 ou …?IM_DIALOG=chat24243" required></label>
-      <label for="cvAddResp">Responsável<select id="cvAddResp"></select></label>
-    </div>
-    <div class="err" id="cvAddErr"></div>
-    <div style="display:flex;gap:8px;justify-content:flex-end"><button class="btn" type="button" id="cvAddCancel">Cancelar</button><button class="btn pri" type="submit" id="cvAddOk">Adicionar</button></div>
-  </form>
-</div>
-
 <div class="modal" id="mBloq" role="dialog" aria-modal="true" aria-labelledby="mBloqT">
   <form class="box" id="fBloq" style="width:min(460px,100%)">
     <h2 id="mBloqT">Bloquear máquina para atendimento</h2>
@@ -656,6 +642,6 @@
   </form>
 </div>
 
-<script type="module" src="js/app.js?v=016"></script>
+<script type="module" src="js/app.js?v=019"></script>
 </body>
 </html>
