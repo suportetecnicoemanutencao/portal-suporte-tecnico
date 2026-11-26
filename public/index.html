@@ -8,7 +8,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700;800&family=Source+Sans+3:wght@400;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="css/app.css?v=014">
+<link rel="stylesheet" href="css/app.css?v=015">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 </head>
 <body>
@@ -147,7 +147,7 @@
       <div class="card">
         <h2>Conversa no Bitrix</h2>
         <div class="filtros"><input id="bxNumero" placeholder="Nº da conversa (ex.: 28795)" inputmode="numeric" style="flex:1"><button class="btn pri" id="bxVincular" type="button">Vincular</button></div>
-        <div class="err" id="bxErr"></div>
+        <div class="err" id="bxErr" role="alert" aria-live="assertive"></div>
         <div id="bxDados"></div>
       </div>
       <div class="card">
@@ -626,7 +626,7 @@
 
 <div class="modal" id="mBitrix" role="dialog" aria-modal="true" aria-labelledby="mBitrixT">
   <form class="box" id="fBitrix" style="width:min(560px,100%)">
-    <h2 id="mBitrixT">Conectar meu Bitrix</h2>
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:10px"><h2 id="mBitrixT" style="margin:0">Conectar meu Bitrix</h2><button class="btn sm" type="button" id="bxFechar" aria-label="Fechar">✕</button></div>
     <p class="lead" style="margin:0;font-size:14px">Com o seu webhook, o portal lê a <b>sua lista de Canais Abertos</b> a cada minuto, igual ao Monitor: aparecem todas as conversas que você vê no Bitrix (responsável, convidada, na fila ou com o Atendente virtual).</p>
     <ol class="lead" style="margin:0;padding-left:20px;font-size:14px">
       <li>No Bitrix, logada com <b>o seu usuário</b>: <b>Aplicativos → Desenvolvedores → Outros → Webhook de entrada</b>.</li>
@@ -634,7 +634,7 @@
       <li>Copie o endereço gerado (ex.: <code>https://nebulize.bitrix24.com.br/rest/8937/abc123…/</code>) e cole abaixo.</li>
     </ol>
     <div class="form" style="grid-template-columns:1fr"><label for="bxHook">Webhook de entrada<input id="bxHook" autocomplete="off" placeholder="https://nebulize.bitrix24.com.br/rest/…/…/"></label></div>
-    <div class="err" id="bxErr"></div>
+    <div class="err" id="bxErr" role="alert" aria-live="assertive"></div>
     <div style="display:flex;gap:8px;justify-content:space-between;flex-wrap:wrap"><button class="btn" type="button" id="bxRemover">Desconectar</button><span style="display:flex;gap:8px"><button class="btn" type="button" id="bxCancel">Cancelar</button><button class="btn pri" type="submit" id="bxOk">Conectar</button></span></div>
   </form>
 </div>
@@ -656,6 +656,6 @@
   </form>
 </div>
 
-<script type="module" src="js/app.js?v=014"></script>
+<script type="module" src="js/app.js?v=015"></script>
 </body>
 </html>

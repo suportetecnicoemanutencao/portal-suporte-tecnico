@@ -448,7 +448,8 @@ async function statusBitrix() {
   }
 }
 $("#cvBitrix").onclick = () => { $("#bxHook").value = ""; $("#bxErr").textContent = ""; $("#bxRemover").hidden = !me.bitrix_conectado_em; $("#mBitrix").classList.add("on"); $("#bxHook").focus(); };
-$("#bxCancel").onclick = () => $("#mBitrix").classList.remove("on");
+$("#bxCancel").onclick = $("#bxFechar").onclick = () => $("#mBitrix").classList.remove("on");
+document.addEventListener("keydown", e => { if (e.key === "Escape") $$(".modal.on").forEach(m => m.classList.remove("on")); });
 $("#fBitrix").addEventListener("submit", async e => {
   e.preventDefault();
   const b = $("#bxOk"); b.disabled = true; b.textContent = "Testando…"; $("#bxErr").textContent = "";
@@ -457,7 +458,7 @@ $("#fBitrix").addEventListener("submit", async e => {
     $("#mBitrix").classList.remove("on");
     toast(`Bitrix conectado (${j.nome}) — ${j.conversas} conversas na sua lista; aparecem em até 1 min`);
     statusBitrix();
-  } catch (err) { $("#bxErr").textContent = err.message; }
+  } catch (err) { $("#bxErr").textContent = "Não conectou: " + err.message; }
   b.disabled = false; b.textContent = "Conectar";
 });
 $("#bxRemover").onclick = async () => {

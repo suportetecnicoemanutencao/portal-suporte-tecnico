@@ -258,3 +258,5 @@ body.fin #nav a:not([data-v="maquinas"]),body.fin #nav .grp,body.fin #btnAtual,b
 .cv-msg{max-width:85%;padding:6px 10px;border-radius:10px;font-size:14px;background:var(--card);border:1px solid var(--line);align-self:flex-start;white-space:pre-wrap;word-break:break-word}
 .cv-msg.eu{align-self:flex-end;background:var(--ok-bg)}
 .cv-msg small{display:block;font-size:11px;color:var(--muted);font-weight:700}
+
+[hidden]{display:none!important}
