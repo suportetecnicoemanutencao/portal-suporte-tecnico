@@ -775,20 +775,18 @@ const maqPorSerie = n => maquinas.find(m => m.serie_norm === n);
 function linhaMaq(m, b) {
   const bloq = b && b.bloqueado;
   const acao = !podeBloquear() ? "" : bloq
-    ? `<button class="btn sm" type="button" data-mqlib="${esc(b.serie_norm)}">Liberar</button>`
-    : `<button class="btn sm" type="button" data-mqbloq="${esc(m.serie_norm || "")}" data-mqserie="${esc(m.serie || "")}" style="border-color:var(--crit);color:var(--crit)">Bloquear para atendimento</button>`;
-  return `<tr class="${bloq ? "mq-bloq" : ""}"><td class="num"><b>${esc(m.serie || "—")}</b></td>
-    <td>${esc((m.modelo || "").replace(/_$/, ""))}<br><small class="lead" style="font-size:12px">${esc(m.descricao || m.kit || "")}</small></td>
-    <td>${esc(m.cod_cliente || "")}<br><small class="lead" style="font-size:12px">${esc(m.nome || "")}</small></td>
-    <td>${esc(m.estabelecimento || "—")}</td><td>${esc([m.cidade, m.uf].filter(Boolean).join(" / ") || "—")}</td>
-    <td class="num">${esc(m.contrato || "—")}${m.nf ? `<br><small class="lead" style="font-size:12px">NF ${esc(m.nf)}</small>` : ""}</td>
-    <td>${bloq ? `<span class="pill crit">Bloqueada para atendimento</span><br><small style="font-size:12px">${esc(b.motivo || "Pendência financeira")} · ${esc(b.atualizado_por_nome || "")} ${fmtDH(b.atualizado_em)}</small>` : '<span class="pill ok">Liberada</span>'}${m.observacoes ? `<br><small class="lead" style="font-size:12px">${esc(m.observacoes)}</small>` : ""}</td>
-    <td class="mq-gestao">${acao}</td></tr>`;
+    ? `<button class="btn sm" type="button" data-mqlib="${esc(b.serie_norm)}" style="margin-top:6px">Liberar para atendimento</button>`
+    : `<button class="btn sm" type="button" data-mqbloq="${esc(m.serie_norm || "")}" data-mqserie="${esc(m.serie || "")}" style="margin-top:6px;border-color:var(--crit);color:var(--crit)">Bloquear para atendimento</button>`;
+  return `<tr class="${bloq ? "mq-bloq" : ""}"><td class="num" style="white-space:nowrap"><b>${esc(m.serie || "—")}</b><br><small class="lead" style="font-size:12px">${esc((m.modelo || "").replace(/_$/, ""))}</small></td>
+    <td>${esc(m.cod_cliente || "")} · ${esc(m.nome || "")}<br><small class="lead" style="font-size:12px">${esc(m.estabelecimento || "")}${m.cidade ? " — " + esc([m.cidade, m.uf].filter(Boolean).join("/")) : ""}</small></td>
+    <td><small style="font-size:12px">${esc(m.descricao || m.kit || "—")}</small>${m.contrato || m.nf ? `<br><small class="lead" style="font-size:12px">Contrato ${esc(m.contrato || "—")}${m.nf ? " · NF " + esc(m.nf) : ""}</small>` : ""}</td>
+    <td>${bloq ? `<span class="pill crit">Bloqueada para atendimento</span><br><small style="font-size:12px">${esc(b.motivo || "Pendência financeira")} · ${esc(b.atualizado_por_nome || "")} ${fmtDH(b.atualizado_em)}</small>` : '<span class="pill ok">Liberada</span>'}${m.observacoes ? `<br><small class="lead" style="font-size:12px">${esc(m.observacoes)}</small>` : ""}${acao ? "<br>" + acao : ""}</td></tr>`;
 }
+const CAB_MAQ = "<tr><th>Nº de série</th><th>Cliente · loja</th><th>Kit · contrato</th><th>Situação</th></tr>";
 function renderMaquinas() {
   const ativos = Object.values(bloqueios).filter(b => b.bloqueado).sort((a, b) => Date.parse(b.atualizado_em) - Date.parse(a.atualizado_em));
   $("#mqBloqueadas").innerHTML = ativos.length
-    ? `<div class="card" style="border-left:5px solid var(--crit)"><h2>Máquinas bloqueadas para atendimento · ${ativos.length}</h2><div class="tw"><table class="lista"><thead><tr><th>Nº de série</th><th>Modelo / kit</th><th>Cliente</th><th>Loja</th><th>Cidade</th><th>Contrato · NF</th><th>Situação</th><th class="mq-gestao">Financeiro</th></tr></thead><tbody>${ativos.map(b => linhaMaq(maqPorSerie(b.serie_norm) || { serie: b.serie, serie_norm: b.serie_norm }, b)).join("")}</tbody></table></div></div>`
+    ? `<div class="card" style="border-left:5px solid var(--crit)"><h2>Máquinas bloqueadas para atendimento · ${ativos.length}</h2><div class="tw"><table class="lista"><thead>${CAB_MAQ}</thead><tbody>${ativos.map(b => linhaMaq(maqPorSerie(b.serie_norm) || { serie: b.serie, serie_norm: b.serie_norm }, b)).join("")}</tbody></table></div></div>`
     : `<div class="note ok" style="margin:0">Nenhuma máquina bloqueada para atendimento no momento.</div>`;
   const q = semAcento($("#mqBusca").value.trim()), qs = normSerie($("#mqBusca").value);
   if (!maquinas.length) {
