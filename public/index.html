@@ -8,7 +8,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700;800&family=Source+Sans+3:wght@400;600;700&display=swap" rel="stylesheet">
-<link rel="stylesheet" href="css/app.css?v=019">
+<link rel="stylesheet" href="css/app.css?v=020">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
 </head>
 <body>
@@ -33,6 +33,7 @@
   <a href="#dashboard" data-v="dashboard" class="sup-only"><span class="n">▤</span>Dashboard</a>
   <a href="#relatorio" data-v="relatorio" class="sup-only"><span class="n">⎙</span>Relatório mensal</a>
   <div class="grp">Guia</div>
+  <a href="#pesquisa" data-v="pesquisa"><span class="n">?</span>Pesquisa técnica</a>
   <a href="#inicio" data-v="inicio"><span class="n">⌂</span>Fluxo e acessos</a>
   <a href="#recepcao" data-v="recepcao"><span class="n">1</span>Recepção</a>
   <a href="#identificacao" data-v="identificacao"><span class="n">2</span>Identificação</a>
@@ -527,6 +528,21 @@
 </section>
 
 <!-- VIDEOS -->
+<section class="view" id="v-pesquisa">
+  <div class="banner">
+    <div style="flex:1;min-width:240px"><h1>Pesquisa técnica</h1>
+      <p class="lead">Tire dúvidas sobre as máquinas durante o atendimento: sintomas, alarmes do display, medições, LEDs, manutenção, especificações e dúvidas comuns de cliente. Base: Guia Técnico de Campo (troubleshooting) — NB400/NB800 (manual Rv4, fw 1.20), NB3i/6i/10i, NB6C, NB100S e SU6M.</p></div>
+  </div>
+  <div class="card">
+    <label for="tsBusca" class="sr-only">Pesquisar</label>
+    <input id="tsBusca" type="search" autocomplete="off" placeholder="Ex.: sem água, não nebuliza, SOBRE TEMP, LED alarme, filtro, 110V, ressonador…" style="width:100%;box-sizing:border-box;padding:10px 12px;border:1px solid var(--line);border-radius:8px;background:var(--card);font-size:16px">
+    <div class="ts-chips" id="tsModelos" role="group" aria-label="Modelo"></div>
+    <div class="ts-chips" id="tsTipos" role="group" aria-label="Tipo de informação"></div>
+    <p class="salvo" id="tsInfo" style="margin:6px 0 0"></p>
+  </div>
+  <div id="tsRes" style="display:flex;flex-direction:column;gap:10px"></div>
+</section>
+
 <section class="view" id="v-videos">
   <div>
     <h1>Vídeos e links de testes</h1>
@@ -642,6 +658,6 @@
   </form>
 </div>
 
-<script type="module" src="js/app.js?v=019"></script>
+<script type="module" src="js/app.js?v=020"></script>
 </body>
 </html>

@@ -122,9 +122,36 @@ async function listar(hook: string) {
 }
 
 type Perfil = { id: string; nome: string; bitrix_user_id: number }
+/** nºs de série das máquinas de aluguel: parte normalizada → nº da base (uma linha da planilha pode ter "NB61064/NB61028") */
+type Series = Map<string, { norm: string; serie: string }>
+async function carregarSeries(db: SupabaseClient): Promise<Series> {
+  const mapa: Series = new Map()
+  const { data } = await db.from("maquinas_aluguel").select("serie,serie_norm").not("serie_norm", "is", null)
+  for (const m of data || []) {
+    for (const parte of String(m.serie || "").split(/[\/,;|\s]+/)) {
+      const n = parte.toUpperCase().replace(/[^A-Z0-9]/g, "")
+      if (n.length >= 6 && /\d/.test(n) && /[A-Z]/.test(n)) mapa.set(n, { norm: m.serie_norm, serie: m.serie })
+    }
+  }
+  return mapa
+}
+/** nºs de série da base citados num texto (ex.: "NB10i7008", "nbv 43010") */
+function seriesNoTexto(texto: string, series: Series) {
+  const achados = new Map<string, { norm: string; serie: string; trecho: string }>()
+  const limpo = limparTexto(texto)
+  // palavra sozinha ou até 3 palavras juntas ("NBV 43010", "NB10i-7008", "nb 10i 7008")
+  const toks = limpo.toUpperCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").split(/[^A-Z0-9]+/).filter(Boolean)
+  for (let i = 0; i < toks.length; i++) {
+    for (const cand of [toks[i], toks[i] + (toks[i + 1] || ""), toks[i] + (toks[i + 1] || "") + (toks[i + 2] || "")]) {
+      const hit = series.get(cand)
+      if (hit) achados.set(hit.norm, { ...hit, trecho: limpo.slice(0, 160) })
+    }
+  }
+  return [...achados.values()]
+}
 
 /** Roda a fila de uma usuária. Devolve quantas conversas ficaram na fila. */
-async function filaDaUsuaria(db: SupabaseClient, p: Perfil, hook: string, tempoOk: () => boolean) {
+async function filaDaUsuaria(db: SupabaseClient, p: Perfil, hook: string, tempoOk: () => boolean, series: Series) {
   const uid = Number(p.bitrix_user_id), ops = [uid]
   const agora = Date.now()
   const lista = await listar(hook)
@@ -287,15 +314,22 @@ async function filaDaUsuaria(db: SupabaseClient, p: Perfil, hook: string, tempoO
   // ---------- cobranças (varrerCobrancas_) ----------
   const { data: cobAbertas } = await db.from("fila_cobrancas").select("dialog_id").eq("perfil_id", p.id).eq("status", "pendente")
   const temCob = new Set((cobAbertas || []).map(c => c.dialog_id))
-  const novasCob: any[] = [], marcarScan: any[] = []
+  const novasCob: any[] = [], marcarScan: any[] = [], maquinas: any[] = []
+  const acharSerie = (d: string, texto: string) => {
+    for (const a of seriesNoTexto(texto, series)) maquinas.push({ dialog_id: d, serie_norm: a.norm, serie: a.serie, trecho: a.trecho })
+  }
   for (const it of minhas) {
     const m = it.message || {}; const d = dialogIdDe(it)
+    if (series.size && m.text) acharSerie(d, String(m.text))
     const c = cacheMsgs.get(d)
     if (!m.id || !c?.msgs || String(c.cob_ultimo_id) === String(m.id)) continue
     const desde = Number(c.cob_ultimo_id || 0)
     marcarScan.push({ perfil_id: p.id, dialog_id: d, ultimo_id: c.ultimo_id, msgs: c.msgs, cob_ultimo_id: String(m.id) })
+    // nº de série de máquina de aluguel citado nas mensagens novas (na primeira leitura, todas as guardadas)
+    if (series.size) for (const x of c.msgs as any[]) if (Number(x.id) > desde && x.text) acharSerie(d, String(x.text))
     if (temCob.has(d)) continue
     const novas = (c.msgs as any[]).filter(x => Number(x.id) > desde && Number(x.author_id) !== 0).sort((a, b) => Date.parse(b.date) - Date.parse(a.date))
+
     // na primeira leitura de uma conversa só vale o que for das últimas 48 h (evita cobranças antigas já feitas)
     const base = desde ? novas : novas.filter(x => agora - Date.parse(x.date) < 48 * H)
     const explicita = base.find(x => ops.includes(Number(x.author_id)) && RX_COBRANCA_EXPLICITA.test(String(x.text || "").toLowerCase()))
@@ -308,6 +342,10 @@ async function filaDaUsuaria(db: SupabaseClient, p: Perfil, hook: string, tempoO
     temCob.add(d)
   }
   if (novasCob.length) await db.from("fila_cobrancas").insert(novasCob)
+  if (maquinas.length) {
+    const unicos = [...new Map(maquinas.map(x => [x.dialog_id + "|" + x.serie_norm, x])).values()]
+    await db.from("conversa_maquinas").upsert(unicos, { onConflict: "dialog_id,serie_norm", ignoreDuplicates: true })
+  }
   if (marcarScan.length) await db.from("fila_mensagens").upsert(marcarScan, { onConflict: "perfil_id,dialog_id" })
 
   // ---------- grava a fila (com pausados) ----------
@@ -323,8 +361,35 @@ async function filaDaUsuaria(db: SupabaseClient, p: Perfil, hook: string, tempoO
   await db.from("perfis").update({ bitrix_lista_em: new Date().toISOString(), bitrix_lista_erro: null }).eq("id", p.id)
 
   // ---------- avisos no sino do Bitrix (verificarUsuario_ / resumoUsuario_) ----------
+  await avisarBloqueadas(db, p, hook, linhas)   // a qualquer hora, uma vez por conversa e máquina
   await avisar(db, p, hook, linhas.filter(l => l.perfil_id === p.id))   // repassadas: avisa no portal de quem recebeu
   return linhas.length
+}
+
+/** máquina bloqueada pelo financeiro citada numa conversa da usuária: avisa uma vez por conversa e máquina */
+async function avisarBloqueadas(db: SupabaseClient, p: Perfil, hook: string, linhas: any[]) {
+  if (!linhas.length) return
+  const dialogs = [...new Set(linhas.map(l => l.dialog_id))]
+  const { data: cm } = await db.from("conversa_maquinas").select("dialog_id,serie_norm,serie").in("dialog_id", dialogs)
+  if (!cm?.length) return
+  const { data: bl } = await db.from("maquinas_bloqueio").select("serie_norm,serie,motivo").eq("bloqueado", true).in("serie_norm", [...new Set(cm.map(x => x.serie_norm))])
+  if (!bl?.length) return
+  const bloq = new Map(bl.map(b => [b.serie_norm, b]))
+  const { data: nt } = await db.from("fila_notificados").select("chave").eq("perfil_id", p.id).like("chave", "B:%")
+  const ja = new Set((nt || []).map(n => n.chave))
+  const gravar: any[] = []
+  for (const x of cm) {
+    const b = bloq.get(x.serie_norm); if (!b) continue
+    const chave = `B:${x.dialog_id}:${x.serie_norm}`; if (ja.has(chave)) continue
+    const l = linhas.find(y => y.dialog_id === x.dialog_id)
+    const nome = String(l?.nome || "Cliente").split(" - ")[0]
+    const motivo = b.motivo || "Pendência financeira"
+    const texto = `⛔ [B]Máquina bloqueada pelo financeiro[/B]: ${b.serie || x.serie} citada na conversa com [URL=https://nebulize.bitrix24.com.br/online/?IM_DIALOG=${x.dialog_id}]${nome}[/URL]. Motivo: ${motivo}. Segure o atendimento e oriente o cliente a falar com o financeiro.`
+    try { await bitrix("im.notify.system.add", { USER_ID: p.bitrix_user_id, MESSAGE: texto }, hook) } catch (e) { console.error("aviso bloqueio:", (e as Error).message) }
+    await db.from("notificacoes").insert({ usuario_id: l?.perfil_id || p.id, tipo: "maquina_bloqueada", titulo: `Máquina ${b.serie || x.serie} bloqueada — ${nome}`, mensagem: `Citada na conversa do Bitrix. ${motivo}. Segure o atendimento.` })
+    gravar.push({ perfil_id: p.id, chave, em: new Date().toISOString() })
+  }
+  if (gravar.length) await db.from("fila_notificados").upsert(gravar, { onConflict: "perfil_id,chave" })
 }
 
 async function avisar(db: SupabaseClient, p: Perfil, hook: string, linhas: any[]) {
@@ -383,11 +448,12 @@ export async function filaDaEquipe(db: SupabaseClient, tempoOk: () => boolean) {
   if (error) { console.error("fila: rode o supabase/010 (" + error.message + ")"); return { usuarias: 0, conversas: 0 } }
   const { data: perfis } = await db.from("perfis").select("id,nome,bitrix_user_id,ativo").in("id", (hooks || []).map(h => h.perfil_id))
   let usuarias = 0, conversas = 0
+  const series = await carregarSeries(db).catch(() => new Map() as Series)
   for (const h of hooks || []) {
     const p = (perfis || []).find(x => x.id === h.perfil_id)
     if (!p?.ativo || !tempoOk()) continue
     try {
-      conversas += await filaDaUsuaria(db, { id: p.id, nome: p.nome, bitrix_user_id: Number(h.bitrix_user_id) }, h.webhook, tempoOk)
+      conversas += await filaDaUsuaria(db, { id: p.id, nome: p.nome, bitrix_user_id: Number(h.bitrix_user_id) }, h.webhook, tempoOk, series)
       usuarias++
     } catch (e) {
       console.error("fila", p.nome, (e as Error).message)

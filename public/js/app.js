@@ -394,7 +394,7 @@ $("#btnNota").onclick = async () => {
 /* ================= MINHAS CONVERSAS ================= */
 // Mesmo motor do Monitor Bitrix da Katielen: a fila vem pronta da tabela fila_conversas
 // (calculada a cada minuto com a lista de Canais Abertos de cada usuária — netlify/lib/fila.mts).
-let fila = [], filaCob = [], cvFiltro = "", cvPessoa = null, cvBuscaTxt = "", cvPausaAlvo = null, cvChamados = [];
+let fila = [], filaCob = [], cvMaquinas = {}, cvFiltro = "", cvPessoa = null, cvBuscaTxt = "", cvPausaAlvo = null, cvChamados = [];
 const H_ATUALIZAR_CHAMADO = 24;
 const CV = {
   pedido: ["Pedido prometido", "var(--crit)", "crit"],
@@ -534,6 +534,13 @@ async function carregarConversas() {
   fila = (rf.data || []).sort((a, b) => (a.origem_id === a.perfil_id ? 0 : 1) - (b.origem_id === b.perfil_id ? 0 : 1))
     .filter(c => { const k = c.perfil_id + "|" + c.dialog_id; if (vistos.has(k)) return false; vistos.add(k); return true; });
   filaCob = rc.data || [];
+  // nºs de série de máquinas de aluguel citados nas conversas (achados pelo monitor)
+  const dialogs = [...new Set(fila.map(c => c.dialog_id))];
+  cvMaquinas = {};
+  if (dialogs.length) {
+    const { data: cm } = await sb.from("conversa_maquinas").select("dialog_id,serie_norm,serie,trecho").in("dialog_id", dialogs);
+    for (const x of cm || []) (cvMaquinas[x.dialog_id] ||= []).push(x);
+  }
   avisarNovas(fila);
   await carregarChamadosCv();
   renderConversas();
@@ -621,12 +628,16 @@ function linhaConversa(c) {
     : `cliente esperando há ${haQuanto(c.ts)}`;
   const urgente = !c.pausado && (t === "pedido" || (t === "cliente" && Date.now() - Date.parse(c.ts) > DIA));
   const cor = c.pausado ? "var(--muted)" : CV[t]?.[1] || "var(--line)";
-  const bloq = at && bloqueioDaSerie(at.numero_serie);
+  const maqs = cvMaquinas[c.dialog_id] || [];
+  const maqBloq = maqs.map(x => bloqueios[x.serie_norm]).find(b => b && b.bloqueado);
+  const bloq = (at && bloqueioDaSerie(at.numero_serie)) || maqBloq;
+  const pillsMaq = maqs.filter(x => !(bloqueios[x.serie_norm]?.bloqueado)).map(x => `<span class="pill maq-ok" title="Nº de série citado na conversa: ${esc(x.trecho || "")}">Máquina ${esc(x.serie || x.serie_norm)} · locação</span>`).join("");
   const repassada = c.perfil_id !== c.origem_id;
   const respSel = `<select class="btn sm" data-cvresp="${esc(k)}" aria-label="Responsável pela conversa" title="Responsável pela conversa">${auxiliaresEquipe().map(p => `<option value="${p.id}"${p.id === c.perfil_id ? " selected" : ""}>Resp.: ${esc(p.nome.split(" ")[0])}</option>`).join("")}${repassada ? '<option value="__auto">Voltar ao responsável do Bitrix</option>' : ""}</select>`;
   return `<div class="cv${urgente ? " urgente" : ""}"><span class="bar" style="background:${cor}"></span>
-    <div><div class="tt"><b>${esc(c.nome || "Cliente")}</b>${c.na_fila ? '<span class="pill warn">Na fila — aceite no Bitrix</span>' : ""}${at ? `<span class="pill ok">#${at.id}${at.os_numero ? " · O.S. " + esc(at.os_numero) : ""}</span>` : ""}${bloq ? '<span class="pill crit">Máquina bloqueada — segurar atendimento</span>' : ""}${c.pausado ? `<span class="pill">Pausada · ${CV[t]?.[0] || ""}</span>` : ""}${repassada ? `<span class="pill info">Passada por ${esc((perfis[c.origem_id]?.nome || "").split(" ")[0])}</span>` : ""}${isSup() && !cvPessoa ? `<span class="pill">${esc(perfis[c.perfil_id]?.nome || "")}</span>` : ""}<span class="salvo">${espera}</span></div>
+    <div><div class="tt"><b>${esc(c.nome || "Cliente")}</b>${c.na_fila ? '<span class="pill warn">Na fila — aceite no Bitrix</span>' : ""}${at ? `<span class="pill ok">#${at.id}${at.os_numero ? " · O.S. " + esc(at.os_numero) : ""}</span>` : ""}${bloq ? `<span class="pill crit" title="${esc(bloq.motivo || "Pendência financeira")}">Máquina ${esc(bloq.serie || "")} bloqueada pelo financeiro — segurar atendimento</span>` : ""}${pillsMaq}${c.pausado ? `<span class="pill">Pausada · ${CV[t]?.[0] || ""}</span>` : ""}${repassada ? `<span class="pill info">Passada por ${esc((perfis[c.origem_id]?.nome || "").split(" ")[0])}</span>` : ""}${isSup() && !cvPessoa ? `<span class="pill">${esc(perfis[c.perfil_id]?.nome || "")}</span>` : ""}<span class="salvo">${espera}</span></div>
     <div class="txt">${esc(c.texto || "(arquivo, áudio ou imagem)")}</div>
+    ${bloq ? `<div class="note crit" style="margin-top:6px;padding:6px 10px;font-size:14px"><b style="display:inline">Máquina ${esc(bloq.serie || "")} bloqueada pelo financeiro</b> · ${esc(bloq.motivo || "Pendência financeira")}. Segure o atendimento e oriente o cliente a falar com o financeiro.</div>` : ""}
     ${c.pausado ? `<div class="pausa">Pausada em ${fmtDH(c.pausado_em)}${c.motivo ? " · Justificativa: " + esc(c.motivo) : ""}</div>` : ""}</div>
     <div class="acoes"><button class="btn sm" type="button" data-cvmsgs="${esc(k)}" aria-expanded="${!!cvMsgs[k]}">${cvMsgs[k] ? "Fechar mensagens" : "Ler mensagens"}</button><a class="btn sm" href="${linkBitrix(c.dialog_id)}" target="_blank" rel="noopener">Abrir no Bitrix</a>
     ${at ? `<button class="btn sm" type="button" data-cvat="${at.id}">Atendimento</button>` : `<button class="btn sm" type="button" data-cvreg="${esc(c.dialog_id)}">Registrar</button>`}
@@ -734,6 +745,64 @@ $("#cvGrupos").addEventListener("change", async e => {
   toast(`#${id}: ${STATUS[st]}`); renderLista();
 });
 setInterval(() => { if (me && location.hash === "#conversas") carregarConversas(); }, 60000);
+
+/* ================= PESQUISA TÉCNICA (troubleshooting) ================= */
+let TS = null, tsModelo = "", tsTipo = "";
+const TS_MODELOS = { "": "Todos", nb400: "NB400/NB800", nbi: "NB3i/6i/10i", nb6c: "NB6C", nb100s: "NB100S", su6m: "SU6M", geral: "Geral / comercial" };
+const TS_TIPOS = ["Diagnóstico", "Erro / alarme", "Medição", "Referência", "Checklist", "Manutenção", "Quadro técnico", "Dúvida do cliente"];
+const SEV = { "CRÍTICO": "crit", "ALTO": "warn", "MÉDIO": "info", "BAIXO": "ok" };
+async function abrirPesquisa() {
+  if (!TS) {
+    $("#tsInfo").textContent = "Carregando a base técnica…";
+    try { TS = (await import("./pesquisa-dados.js?v=020")).default; }
+    catch (e) { $("#tsInfo").textContent = "Não foi possível carregar a base técnica: " + e.message; return; }
+    TS.forEach(x => x._busca = semAcento([x.t, x.s, x.comp, x.cat, x.cond, x.proc, x.prov, x.defi, x.causa, x.diag, x.grupo, x.ref, TS_MODELOS[x.m], x.tipo].join(" ")));
+  }
+  const chips = (el, itens, atual, cb) => { el.innerHTML = itens.map(([v, l]) => `<button type="button" data-v="${v}" aria-pressed="${v === atual}">${l}</button>`).join(""); el.onclick = e => { const b = e.target.closest("button[data-v]"); if (b) cb(b.dataset.v); }; };
+  chips($("#tsModelos"), Object.entries(TS_MODELOS), tsModelo, v => { tsModelo = v; abrirPesquisa(); });
+  chips($("#tsTipos"), [["", "Tudo"], ...TS_TIPOS.map(t => [t, t])], tsTipo, v => { tsTipo = v; abrirPesquisa(); });
+  renderPesquisa();
+}
+function marcarTs(txt, termos) {
+  let h = esc(txt || "");
+  if (!termos.length) return h;
+  // destaca os termos (sem acento) no texto original
+  const base = semAcento(txt || ""), marcas = [];
+  termos.forEach(t => { let i = -1; while ((i = base.indexOf(t, i + 1)) !== -1) marcas.push([i, i + t.length]); });
+  if (!marcas.length) return h;
+  marcas.sort((a, b) => a[0] - b[0]);
+  let out = "", pos = 0;
+  for (const [a, b] of marcas) { if (a < pos) continue; out += esc(txt.slice(pos, a)) + "<mark>" + esc(txt.slice(a, b)) + "</mark>"; pos = b; }
+  return out + esc(txt.slice(pos));
+}
+function renderPesquisa() {
+  if (!TS) return;
+  const q = semAcento($("#tsBusca").value.trim());
+  const termos = q.split(/\s+/).filter(t => t.length >= 2);
+  let res = TS.filter(x => (!tsModelo || x.m === tsModelo) && (!tsTipo || x.tipo === tsTipo) && termos.every(t => x._busca.includes(t)));
+  // mais relevante primeiro: termo no título, depois severidade
+  const pontos = x => termos.reduce((p, t) => p + (semAcento(x.t).includes(t) ? 3 : 0) + (semAcento(x.s || "").includes(t) ? 2 : 0), 0) + ({ "CRÍTICO": 1.5, "ALTO": 1 }[x.sev] || 0);
+  if (termos.length) res = res.sort((a, b) => pontos(b) - pontos(a));
+  const total = res.length;
+  if (!termos.length && !tsModelo && !tsTipo) {
+    $("#tsInfo").textContent = `${TS.length} itens na base. Digite o sintoma, o alarme ou a dúvida, ou filtre por modelo.`;
+    $("#tsRes").innerHTML = `<div class="card"><h2>Buscas comuns</h2><div class="ts-chips">${["não nebuliza", "sem água", "transbordando", "LED alarme", "névoa fraca", "não liga", "filtro", "ressonador", "esterilização", "110V", "poço artesiano", "configurar"].map(t => `<button type="button" data-tsq="${t}">${t}</button>`).join("")}</div></div>`;
+    return;
+  }
+  $("#tsInfo").textContent = total ? `${total} resultado${total === 1 ? "" : "s"}${total > 60 ? " — mostrando 60, refine a busca" : ""}` : "";
+  $("#tsRes").innerHTML = total ? res.slice(0, 60).map((x, i) => {
+    const bloco = (titulo, txt) => txt ? `<div class="ts-bloco"><h4>${titulo}</h4><div>${marcarTs(txt, termos)}</div></div>` : "";
+    return `<details class="ts-item"${i < 3 && termos.length ? " open" : ""}><summary><span class="pill">${esc(x.tipo)}</span><span class="pill ok">${esc(TS_MODELOS[x.m] || x.m)}</span>${x.sev ? `<span class="pill ${SEV[x.sev] || ""}">${esc(x.sev)}</span>` : ""}<b>${marcarTs(x.t, termos)}</b></summary>
+      ${x.s ? `<div class="ts-sub">${marcarTs(x.s, termos)}</div>` : ""}
+      ${bloco("Componente", x.comp)}${bloco("Condição inicial", x.cond)}${bloco("Causa provável", x.causa)}
+      ${bloco(x.tipo === "Diagnóstico" ? "Procedimento de teste" : x.tipo === "Erro / alarme" ? "O que fazer" : "Detalhes", x.proc)}
+      ${bloco("Solução provisória", x.prov)}${bloco("Solução definitiva", x.defi)}${bloco("Diagrama", x.diag)}${bloco("Referência", x.ref)}
+      ${x.v ? `<div class="ts-bloco"><h4>Vídeos</h4><div style="display:flex;gap:6px;flex-wrap:wrap;white-space:normal">${x.v.map(([t, u]) => `<a class="btn sm" href="${esc(u)}" target="_blank" rel="noopener">▶ ${esc(t)}</a><button class="btn sm" type="button" data-cl="${esc(u)}">Copiar link</button>`).join("")}</div></div>` : ""}
+    </details>`;
+  }).join("") : `<div class="card"><p class="lead" style="margin:0">Nada encontrado. Tente outras palavras (ex.: "névoa" em vez de "fumaça") ou tire o filtro de modelo. Dúvida técnica fora do guia: chame o Supervisor.</p></div>`;
+}
+let tsT; $("#tsBusca").addEventListener("input", () => { clearTimeout(tsT); tsT = setTimeout(renderPesquisa, 120); });
+$("#tsRes").addEventListener("click", e => { const b = e.target.closest("[data-tsq]"); if (b) { $("#tsBusca").value = b.dataset.tsq; renderPesquisa(); } });
 
 /* ================= MÁQUINAS DE ALUGUEL ================= */
 // base da planilha de aluguel (consulta) + bloqueio para atendimento feito pelo financeiro
@@ -1098,6 +1167,11 @@ function renderMails() {
 function renderVideos() {
   const G = [["NB400 / NB800 · configuração e manutenção", ["instal400", "config400", "limpeza400"]], ["NB400 / NB800 · testes de erro", ["apagado", "standby", "semnevoa", "fraca", "semagua1", "semagua2", "transb", "grava", "botao"]], ["NB6C", ["cfg6c", "cfg6cav"]], ["NB100 / NB100S", ["cfg100s"]], ["Linha NBi e bancada ED120", ["ed120", "nbi1", "nbi2"]], ["Todos os modelos", ["filtro"]]];
   $("#vidList").innerHTML = G.map(([t, ids]) => `<div class="card"><h2>${t}</h2><div style="display:flex;flex-direction:column;gap:8px">${vidHTML(ids)}</div></div>`).join("") +
+    `<div class="card"><h2>Guias interativos · SU6M e NB6i</h2><p class="lead" style="margin:0 0 10px">Material de apoio para mostrar ao cliente ou consultar na instalação e configuração.</p><div style="display:flex;flex-direction:column;gap:8px">${[
+      ["Instalação do SU6M na bancada ED.120 (passo a passo)", "https://claude.ai/artifact/TjHvpo8iXbBxQfaXCn2wok"],
+      ["SU6M na ED.120 em 3D — sequência de instalação e lista de material", "https://claude.ai/artifact/4HepMhdN6xG3dsmbZykFMj"],
+      ["NB6i — como configurar o painel (animação)", "https://claude.ai/artifact/6qiEGQ6mzeqiXGsmvauZj7"],
+    ].map(([t, u]) => `<div class="vid"><a href="${u}" target="_blank" rel="noopener">${t}</a><button class="btn sm" type="button" data-cl="${u}">Copiar link</button></div>`).join("")}</div></div>` +
     `<div class="card"><h2>Máquina instalada em 3D</h2><p class="lead" style="margin:0 0 10px">Para mostrar ao cliente como fica o equipamento instalado na bancada ou câmara fria.</p><div class="vid"><a href="https://ferramentas-3d-nebulize.netlify.app" target="_blank" rel="noopener">Ferramentas 3D Nebulize</a><button class="btn sm" type="button" data-cl="https://ferramentas-3d-nebulize.netlify.app">Copiar link</button></div></div>`;
 }
 function renderNovos() {
@@ -1187,7 +1261,7 @@ $("#btnCsv").onclick = () => {
 };
 
 /* ================= ROTAS ================= */
-const VIEWS = ["maquinas", "atendimentos", "conversas", "atendimento", "dashboard", "relatorio", "inicio", "recepcao", "identificacao", "testes", "chamado", "fora-garantia", "rma", "acompanhamento", "tecnicos", "emails", "videos", "supervisor"];
+const VIEWS = ["pesquisa", "maquinas", "atendimentos", "conversas", "atendimento", "dashboard", "relatorio", "inicio", "recepcao", "identificacao", "testes", "chamado", "fora-garantia", "rma", "acompanhamento", "tecnicos", "emails", "videos", "supervisor"];
 function route() {
   const h = (location.hash || "").slice(1);
   let cur = VIEWS.includes(h) ? h : "atendimentos";
@@ -1201,6 +1275,7 @@ function route() {
   if (cur === "atendimentos") renderLista();
   if (cur === "conversas") carregarConversas();
   if (cur === "maquinas") abrirMaquinas();
+  if (cur === "pesquisa") abrirPesquisa();
   window.scrollTo(0, 0);
 }
 window.addEventListener("hashchange", route);

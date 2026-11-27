@@ -260,3 +260,18 @@ body.fin #nav a:not([data-v="maquinas"]),body.fin #nav .grp,body.fin #btnAtual,b
 .cv-msg small{display:block;font-size:11px;color:var(--muted);font-weight:700}
 
 [hidden]{display:none!important}
+
+/* Pesquisa técnica (troubleshooting) */
+.ts-chips{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px}
+.ts-chips button{border:1px solid var(--line);background:var(--card);border-radius:99px;padding:5px 12px;font-weight:600;font-size:13px;cursor:pointer;color:inherit}
+.ts-chips button[aria-pressed="true"]{background:var(--green);border-color:var(--green);color:#fff}
+.ts-item{border:1px solid var(--line);border-radius:12px;background:var(--card);padding:12px 14px}
+.ts-item summary{cursor:pointer;display:flex;gap:8px;flex-wrap:wrap;align-items:center;list-style:none}
+.ts-item summary::-webkit-details-marker{display:none}
+.ts-item summary b{font-size:16px}
+.ts-item .ts-sub{color:var(--muted);font-size:14px;margin-top:2px}
+.ts-item .ts-bloco{margin-top:10px}
+.ts-item .ts-bloco h4{margin:0 0 4px;font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)}
+.ts-item .ts-bloco div{white-space:pre-wrap;font-size:15px}
+.ts-item mark{background:#f0b04a55;color:inherit;border-radius:3px;padding:0 1px}
+.pill.maq-ok{background:var(--soft)}

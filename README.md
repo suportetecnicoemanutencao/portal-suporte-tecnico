@@ -21,6 +21,7 @@ supabase/008c_maquinas_permissoes.sql permissões das tabelas de máquinas
 supabase/009_bitrix_por_usuario.sql   atualização: "Conectar meu Bitrix" (webhook de cada usuária)
 supabase/010_fila_como_monitor.sql    atualização: Minhas conversas com o motor do Monitor da Katielen
 supabase/011_fila_resp.sql            atualização: Resp. (passar a conversa para outra pessoa)
+supabase/012_maquina_na_conversa.sql  atualização: nº de série de máquina citado na conversa
 scripts/                gerar-config (build) · criar-usuarios
 ```
 
@@ -195,3 +196,8 @@ No portal: **✓ Pronto** some com a conversa até chegar mensagem nova; **Pausa
 Depois de conferir, desligue os acionadores do Apps Script do Monitor para não receber aviso em dobro.
 
 - **Resp.** (011): passa a conversa para outra pessoa da equipe; ela sai da sua fila e aparece na dela com a etiqueta "Passada por …" até alguém escolher "Voltar ao responsável do Bitrix". Os avisos do sino do Bitrix continuam só para as conversas que ficaram com você; quem recebeu é avisado pelo portal (som/notificação).
+
+## Pesquisa técnica · guias interativos · máquina citada na conversa (atualização 012)
+- **Pesquisa técnica** (menu Guia): busca em toda a base do Guia Técnico de Campo (`public/js/pesquisa-dados.js`, gerado do troubleshooting_Nebulize.html): diagnóstico por sintoma com procedimento e soluções, alarmes do display, medições, LEDs e referências do painel, checklist, manutenção, quadro técnico, dimensionamento e dúvidas de cliente. Filtros por modelo e tipo; vídeos do sintoma com "Copiar link". Para atualizar: gerar de novo o `pesquisa-dados.js` a partir do HTML novo.
+- **Vídeos e links**: card "Guias interativos · SU6M e NB6i" (instalação do SU6M na ED.120, SU6M em 3D, configuração do painel NB6i). Os links são artifacts do claude.ai: compartilhe cada um com a organização para as auxiliares abrirem.
+- **Máquina citada na conversa** (rode `supabase/012_maquina_na_conversa.sql`): o monitor procura os nºs de série da base de máquinas de aluguel nas mensagens (inclusive escritos com espaço, ex. "NB 10i 7008"). O card mostra "Máquina XXX · locação"; se a máquina estiver — ou depois ficar — bloqueada pelo financeiro, o card fica com o aviso vermelho e a responsável recebe um aviso no sino do Bitrix e no sino do portal (uma vez por conversa e máquina, a qualquer hora). Nº de série só em foto ou vídeo não é lido.
